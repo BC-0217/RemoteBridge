@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <LangVersion>7.3</LangVersion>
+    <RootNamespace>PeerDesk.Windows</RootNamespace>
+    <AssemblyName>RemoteBridge</AssemblyName>
+    <Product>RemoteBridge (리모드브리지)</Product>
+    <AssemblyTitle>RemoteBridge (리모드브리지)</AssemblyTitle>
+    <Description>RemoteBridge (리모드브리지) Windows 원격 연결 클라이언트</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Security" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="directory-bootstrap.embedded.json" LogicalName="PeerDesk.Windows.DirectoryBootstrap.json" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net48</TargetFramework><LangVersion>7.3</LangVersion><UseWindowsForms>true</UseWindowsForms><AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages><AssemblyName>PeerDesk.MediaAcceptance</AssemblyName></PropertyGroup>
+<ItemGroup><ProjectReference Include="../../../src/PeerDesk.Windows/PeerDesk.Windows.csproj"/></ItemGroup>
+</Project>

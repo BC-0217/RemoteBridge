@@ -1,0 +1,26 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PeerDesk.Core/PeerDesk.Core.csproj" />
+    <Project Path="src/PeerDesk.Server/PeerDesk.Server.csproj" />
+    <Project Path="src/PeerDesk.Windows/PeerDesk.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PeerDesk.AutoConnectAcceptance/PeerDesk.AutoConnectAcceptance.csproj" />
+    <Project Path="tests/PeerDesk.FixedAccessSmoke/FixedAccess.csproj" />
+    <Project Path="tests/PeerDesk.HistoryRecentSmoke/HistoryRecent.csproj" />
+    <Project Path="tests/PeerDesk.MediaOptimizationSmoke/PeerDesk.MediaOptimizationSmoke.csproj" />
+    <Project Path="tests/PeerDesk.StatefulInputSmoke/PeerDesk.StatefulInputSmoke.csproj" />
+    <Project Path="tests/PeerDesk.StatefulClientSmoke/PeerDesk.StatefulClientSmoke.csproj" />
+    <Project Path="tests/PeerDesk.OwnerRoomSmoke/PeerDesk.OwnerRoomSmoke.csproj" />
+    <Project Path="tests/PeerDesk.OwnerDirectorySmoke/PeerDesk.OwnerDirectorySmoke.csproj" />
+    <Project Path="tests/PeerDesk.OwnerSmoke/PeerDesk.OwnerSmoke.csproj" />
+    <Project Path="tests/PeerDesk.DirectorySmoke/PeerDesk.DirectorySmoke.csproj" />
+    <Project Path="tests/PeerDesk.PasswordSmoke/PeerDesk.PasswordSmoke.csproj" />
+    <Project Path="tests/PeerDesk.Smoke/PeerDesk.Smoke.csproj" />
+    <Project Path="tests/PeerDesk.MediaSmoke/PeerDesk.MediaSmoke.csproj" />
+    <Project Path="tests/PeerDesk.MediaAcceptance/Client/PeerDesk.MediaAcceptance.csproj" />
+    <Project Path="tests/PeerDesk.MediaAcceptance/Host/PeerDesk.MediaAcceptance.Host.csproj" />
+    <Project Path="tests/PeerDesk.ClientSmoke/Client/PeerDesk.ClientSmoke.csproj" />
+    <Project Path="tests/PeerDesk.ClientSmoke/Host/PeerDesk.ClientSmoke.Host.csproj" />
+  </Folder>
+</Solution>

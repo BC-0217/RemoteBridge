@@ -1,0 +1,30 @@
+[Unit]
+Description=PeerDesk consent-based remote relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=peerdesk
+Group=peerdesk
+WorkingDirectory=/var/lib/peerdesk
+EnvironmentFile=/etc/peerdesk/server.env
+Environment=DOTNET_ROOT=/opt/peerdesk/runtime
+Environment=DOTNET_gcServer=0
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+# Example only: install reviewed server binaries into this release-neutral path.
+ExecStart=/opt/peerdesk/runtime/dotnet /opt/peerdesk/current/PeerDesk.Server.dll
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/peerdesk
+UMask=0077
+MemoryAccounting=true
+LimitNOFILE=2048
+
+[Install]
+WantedBy=multi-user.target

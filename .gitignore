@@ -1,0 +1,42 @@
+# Build outputs, local evidence and private operational state
+/artifacts/
+/secrets/
+/server-profiles/
+**/bin/
+**/obj/
+.codegraph.db
+.codegraph.db-*
+.vs/
+*.user
+*.suo
+*.log
+*.dmp
+*.tmp
+*.zip
+*.unaccepted
+
+# Certificates, private keys, tokens and local runtime configuration
+*.pfx
+*.p12
+*.p7b
+*.key
+*.pem
+*.ppk
+*.snk
+.env
+.env.*
+server.env
+owner-config.json
+owner-state.json
+directory-config.json
+directory-state.json
+devices-state.json
+**/settings*.json
+**/settings*.json.*.tmp
+**/*settings*.json
+**/*settings*.json.*.tmp
+history.json
+known_hosts
+id_rsa*
+id_ed25519*
+# The embedded registry JSON is intentionally public, not a secret.
