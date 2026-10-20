@@ -7,9 +7,9 @@
     <LangVersion>7.3</LangVersion>
     <RootNamespace>PeerDesk.Windows</RootNamespace>
     <AssemblyName>RemoteBridge</AssemblyName>
-    <Product>RemoteBridge (리모드브리지)</Product>
-    <AssemblyTitle>RemoteBridge (리모드브리지)</AssemblyTitle>
-    <Description>RemoteBridge (리모드브리지) Windows 원격 연결 클라이언트</Description>
+    <Product>RemoteBridge (리모트브리지)</Product>
+    <AssemblyTitle>RemoteBridge (리모트브리지)</AssemblyTitle>
+    <Description>RemoteBridge (리모트브리지) Windows 원격 연결 클라이언트</Description>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />
@@ -18,4 +18,5 @@
   <ItemGroup>
     <EmbeddedResource Include="directory-bootstrap.embedded.json" LogicalName="PeerDesk.Windows.DirectoryBootstrap.json" />
   </ItemGroup>
+  <ItemGroup><Compile Include="../PeerDesk.ReleaseSecurity/*.cs" Link="ReleaseSecurity/%(Filename)%(Extension)" /></ItemGroup>
 </Project>

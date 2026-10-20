@@ -14,6 +14,13 @@ namespace PeerDesk.Windows
         private readonly bool desktop;
         private readonly IntPtr hwnd;
         private readonly int pid;
+        private readonly string monitorDevice; private readonly Rectangle monitorBounds;
+        private CaptureScope(string device,Rectangle bounds) {desktop=true;hwnd=IntPtr.Zero;pid=0;monitorDevice=device;monitorBounds=bounds;}
+        internal static CaptureScope ForMonitorShare(string device) {
+            foreach(var screen in Screen.AllScreens)if(String.Equals(screen.DeviceName,device,StringComparison.Ordinal))return new CaptureScope(device,screen.Bounds);
+            throw new InvalidOperationException("선택한 모니터가 연결되어 있지 않습니다.");
+        }
+        private Rectangle DesktopBounds(){if(monitorDevice==null)return SystemInformation.VirtualScreen;if(!IsCurrent())throw new InvalidOperationException("모니터 구성이 변경되어 화면 공유를 중지합니다.");return monitorBounds;}
         private CaptureScope(bool isDesktop,IntPtr window,int processId) { desktop=isDesktop; hwnd=window; pid=processId; }
         internal static CaptureScope ForDesktopShare() { return new CaptureScope(true,IntPtr.Zero,0); }
         internal static CaptureScope ForOwnedWindow(IntPtr window,int processId)
@@ -33,19 +40,21 @@ namespace PeerDesk.Windows
         }
         internal bool IsCurrent()
         {
-            if(desktop)return true;
+            if(desktop){if(monitorDevice==null)return true;foreach(var screen in Screen.AllScreens)if(screen.DeviceName==monitorDevice)return screen.Bounds==monitorBounds;return false;}
             if(!IsWindow(hwnd))return false;
             uint actual; GetWindowThreadProcessId(hwnd,out actual);
             return actual==(uint)pid && pid==Process.GetCurrentProcess().Id;
         }
-        internal Bitmap Capture()
+        internal Bitmap Capture() { return Capture(1920,1080); }
+        internal Bitmap Capture(int maxWidth,int maxHeight)
         {
+            if(maxWidth<1||maxWidth>1920||maxHeight<1||maxHeight>1080)throw new ArgumentOutOfRangeException("capture output bounds");
             if(!IsCurrent()) throw new InvalidOperationException("capture scope is no longer valid.");
             Rectangle bounds;
-            if(desktop) bounds=SystemInformation.VirtualScreen;
+            if(desktop) bounds=DesktopBounds();
             else { RECT r; if(!GetClientRect(hwnd,out r))throw new InvalidOperationException("GetClientRect failed."); bounds=new Rectangle(0,0,r.Right-r.Left,r.Bottom-r.Top); }
             if(bounds.Width<=0||bounds.Height<=0||(long)bounds.Width*bounds.Height>16777216)throw new InvalidOperationException("capture source bounds invalid or exceed 16MP safety cap.");
-            double scale=Math.Min(1.0,Math.Min(1920.0/bounds.Width,1080.0/bounds.Height));
+            double scale=Math.Min(1.0,Math.Min((double)maxWidth/bounds.Width,(double)maxHeight/bounds.Height));
             int w=Math.Max(1,(int)Math.Floor(bounds.Width*scale)), h=Math.Max(1,(int)Math.Floor(bounds.Height*scale));
             if((long)w*h>2073600)throw new InvalidOperationException("capture pixel budget exceeded.");
             var bmp=new Bitmap(w,h,PixelFormat.Format24bppRgb);
@@ -83,7 +92,7 @@ namespace PeerDesk.Windows
         }
         internal Rectangle GetInputBounds()
         {
-            if(desktop)return SystemInformation.VirtualScreen;
+            if(desktop)return DesktopBounds();
             if(!IsCurrent())throw new InvalidOperationException("capture window is no longer valid.");
             RECT r; if(!GetClientRect(hwnd,out r))throw new InvalidOperationException("GetClientRect failed.");
             POINT p=new POINT { X=0,Y=0 }; if(!ClientToScreen(hwnd,ref p))throw new InvalidOperationException("ClientToScreen failed.");

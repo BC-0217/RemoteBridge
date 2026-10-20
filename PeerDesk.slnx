@@ -1,10 +1,24 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/PeerDesk.Core/PeerDesk.Core.csproj" />
+    <Project Path="src/PeerDesk.SessionProtocol/PeerDesk.SessionProtocol.csproj" />
+    <Project Path="src/PeerDesk.ReleaseSecurity/PeerDesk.ReleaseSecurity.csproj" />
     <Project Path="src/PeerDesk.Server/PeerDesk.Server.csproj" />
     <Project Path="src/PeerDesk.Windows/PeerDesk.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/PeerDesk.CandidateUpdateSmoke/PeerDesk.CandidateUpdateSmoke.csproj" />
+    <Project Path="tests/PeerDesk.SecureChannelSmoke/PeerDesk.SecureChannelSmoke.csproj" />
+    <Project Path="tests/PeerDesk.ExperienceSmoke/PeerDesk.ExperienceSmoke.csproj" />
+    <Project Path="tests/PeerDesk.PeerTrustSmoke/PeerDesk.PeerTrustSmoke.csproj" />
+    <Project Path="tests/PeerDesk.SessionTransportSmoke/PeerDesk.SessionTransportSmoke.csproj" />
+    <Project Path="tests/PeerDesk.DirectPeerSmoke/PeerDesk.DirectPeerSmoke.csproj" />
+    <Project Path="tests/PeerDesk.PresenceSmoke/PeerDesk.PresenceSmoke.csproj" />
+    <Project Path="tests/PeerDesk.TransferEndpointSmoke/PeerDesk.TransferEndpointSmoke.csproj" />
+    <Project Path="tests/PeerDesk.OpaqueRelaySmoke/PeerDesk.OpaqueRelaySmoke.csproj" />
+    <Project Path="tests/PeerDesk.ReleaseSecuritySmoke/PeerDesk.ReleaseSecuritySmoke.csproj" />
+    <Project Path="tests/PeerDesk.SessionProtocolSmoke/PeerDesk.SessionProtocolSmoke.csproj" />
+    <Project Path="tests/PeerDesk.AdaptiveQualitySmoke/PeerDesk.AdaptiveQualitySmoke.csproj" />
     <Project Path="tests/PeerDesk.AutoConnectAcceptance/PeerDesk.AutoConnectAcceptance.csproj" />
     <Project Path="tests/PeerDesk.FixedAccessSmoke/FixedAccess.csproj" />
     <Project Path="tests/PeerDesk.HistoryRecentSmoke/HistoryRecent.csproj" />
@@ -23,4 +37,5 @@
     <Project Path="tests/PeerDesk.ClientSmoke/Client/PeerDesk.ClientSmoke.csproj" />
     <Project Path="tests/PeerDesk.ClientSmoke/Host/PeerDesk.ClientSmoke.Host.csproj" />
   </Folder>
+  <Folder Name="/tools/"><Project Path="tools/PeerDesk.ReleaseSigning/PeerDesk.ReleaseSigning.csproj" /></Folder>
 </Solution>

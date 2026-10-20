@@ -121,7 +121,7 @@ namespace PeerDesk.Windows
             settingsStore=new SettingsStore(settingsPath);
             try { storedSettings=settingsStore.Load();profileBox.Text=storedSettings.ProfileJson??"";storedCredentialPending=storedSettings.IsRegistered; }
             catch(Exception ex) { settingsInvalid=true;storedSettings=new SettingsState { ProfileJson="" };historyWriteWarning="설정 오류: "+ex.Message; }
-            Text="RemoteBridge — 리모드브리지";
+            Text="RemoteBridge — 리모트브리지";
             Font=new Font("Malgun Gothic",9.75f);
             Width=900; Height=720; MinimumSize=new Size(760,620);
             var root=new TableLayoutPanel { Dock=DockStyle.Fill, ColumnCount=1, RowCount=3, Padding=new Padding(12) };
@@ -215,7 +215,7 @@ namespace PeerDesk.Windows
             settingsLayout.Controls.Add(profileActions,0,3);
             settingsLayout.Controls.Add(profileBox,0,4);
             BuildRolePages(settingsPage,settingsLayout);
-            settingsTabs.TabPages.Add(homePage);settingsTabs.TabPages.Add(sessionPage);InitializeAccessPolicy();settingsTabs.TabPages.Add(serverPage);
+            settingsTabs.TabPages.Add(homePage);settingsTabs.TabPages.Add(sessionPage);InitializeAccessPolicy();settingsTabs.TabPages.Add(serverPage);InitializeExperience(settingsPath);
             settingsTabs.Padding=new Point(14,5);
             settingsTabs.SelectedTab=storedCredentialPending?homePage:serverPage;
             root.Controls.Add(settingsTabs,0,1);
@@ -238,7 +238,7 @@ namespace PeerDesk.Windows
             ownerSecretBox.TextChanged+=OnOwnerSecretChanged;
             UpdateHistoryList();
             SetRegistered(false);
-            SetOwnerEnabled();
+            SetOwnerEnabled();InitializePresence();
             registerButton.Enabled=!storedCredentialPending&&!settingsInvalid;
             resetButton.Enabled=storedCredentialPending&&!settingsInvalid;
             deviceBox.Text=storedCredentialPending?(storedSettings.DeviceId??""):"(미등록)";
@@ -252,9 +252,9 @@ namespace PeerDesk.Windows
             Activated+=(s,e)=>{if(!passwordPollBusy&&passwordWatch.ElapsedMilliseconds-lastPasswordCheckMs>=5000)nextPasswordCheckMs=passwordWatch.ElapsedMilliseconds;};
             passwordTimer.Start();
             FormClosed+=(s,e)=>{passwordTimer.Stop();passwordTimer.Dispose();passwordCancellation.Cancel();passwordCancellation.Dispose();};
-            snapshotTimer.Tick+=async (s,e)=>{CheckSharingStopped();AccessPolicyTick();if(passwordWatch.ElapsedMilliseconds>=nextSnapshotMs)await PollSnapshotAsync();};
+            snapshotTimer.Tick+=async (s,e)=>{CheckSharingStopped();SyncShareIndicator();AccessPolicyTick();if(passwordWatch.ElapsedMilliseconds>=nextSnapshotMs)await PollSnapshotAsync();};
             snapshotTimer.Start();
-            FormClosed+=(s,e)=>{snapshotTimer.Stop();snapshotTimer.Dispose();InvalidateAutomation();};
+            FormClosed+=(s,e)=>{StopPresence();snapshotTimer.Stop();snapshotTimer.Dispose();InvalidateAutomation();};
         }
 
         // ---- Phase 19: consent-gated automation ------------------------------------------------------------------------
@@ -264,7 +264,7 @@ namespace PeerDesk.Windows
         // STOP/reset/close/profile change bump the epoch and drop every authority synchronously, before any await.
         private sealed class AutoRequest { public string SessionId,Binding,OwnId,TargetId; public ControlPlaneClient Client; public long Epoch; public bool ConnectAttempted,ViewerOpened; }
         private sealed class ConsentGrant { public string SessionId,Binding,OwnId,RequesterId; public ControlPlaneClient Client; public long Epoch; public CaptureScope Scope; public bool StartAttempted,Activated; public string PasswordEpoch; public CancellationTokenSource StartCancellation; }
-        private readonly CaptureScope autoCaptureScope;
+        private CaptureScope autoCaptureScope;
         private readonly System.Windows.Forms.Timer snapshotTimer=new System.Windows.Forms.Timer { Interval=250 };
         private const int SnapshotIntervalMs=2000,SnapshotMaxBackoffMs=60000; // 30/min nominal + 4/min PW checks stays under the 60/min quota.
         private readonly Random snapshotJitter=new Random();
@@ -303,6 +303,7 @@ namespace PeerDesk.Windows
                 if(!ReferenceEquals(sharing,stopped)||stopped.IsRunning)return;
                 sharing=null;error=stopped.LastError;sid=stopped.SessionId;
                 string endReason=stopped.EndReason;
+                DiagCleanup(stopped,DiagCleanupSite.StoppedMonitor,null,null);
                 try{await stopped.StopAsync();}catch{}finally{stopped.Dispose();}
                 if(shutdownBusy||IsDisposed)return;
                 if(!String.IsNullOrEmpty(error))
@@ -318,18 +319,29 @@ namespace PeerDesk.Windows
             }
             catch(Exception ex){if(!shutdownBusy&&!IsDisposed)status.Text="공유 중단 정리 오류: "+ex.Message;}
             finally{if(acquired)lifecycleGate.Release();sharingStopCleanupBusy=false;}
-            if(bound!=null)await RefineShareStopMessageAsync(bound,epoch,token,sid,own,peer,diagnostic);
+            if(bound!=null)await RefineShareStopMessageAsync(bound,epoch,token,sid,own,peer,diagnostic,stopped.DiagCorrelation);
         }
         // Runs outside the lifecycle gate. Only an authoritative fresh snapshot row (same client/binding/epoch, matching
         // sid/own/peer, terminal Revoked/Rejected) replaces the error diagnostic with a normal end message. Expired,
         // live, missing rows and any snapshot failure keep the original diagnostic untouched.
-        private async Task RefineShareStopMessageAsync(ControlPlaneClient c,long epoch,CancellationToken token,string sid,string own,string peer,string diagnostic)
+        private async Task RefineShareStopMessageAsync(ControlPlaneClient c,long epoch,CancellationToken token,string sid,string own,string peer,string diagnostic,long diagCorrelation)
         {
             string message=await GetSessionEndMessageAsync(c,epoch,token,sid,own,peer);
-            if(message==null||shutdownBusy||IsDisposed||epoch!=autoEpoch||!ReferenceEquals(client,c)||!registrationVerified)return;
-            if(!String.Equals(shareStopDiagnostic,diagnostic,StringComparison.Ordinal)||sharing!=null)return;
-            shareStopDiagnostic=null;status.Text=message;
+            if(message==null||shutdownBusy||IsDisposed||epoch!=autoEpoch||!ReferenceEquals(client,c)||!registrationVerified){DiagRefine(diagCorrelation,message==null?DiagRefinement.NotAuthoritative:DiagRefinement.StaleContext);return;}
+            if(!String.Equals(shareStopDiagnostic,diagnostic,StringComparison.Ordinal)||sharing!=null){DiagRefine(diagCorrelation,DiagRefinement.Superseded);return;}
+            shareStopDiagnostic=null;status.Text=message;DiagRefine(diagCorrelation,DiagRefinement.Replaced);
         }
+        // Diagnostics only (enums/flags, never LastError or message text); recorded before Stop/Dispose.
+        private static void DiagCleanup(MediaSharingSession s,DiagCleanupSite site,string confirmedEndReason,Exception error)
+        {
+            if(s==null)return;
+            string end=s.EndReason;bool hadError=s.LastError!=null;
+            DiagCleanupReason reason=end=="expired"?DiagCleanupReason.Expired:hadError||error!=null?DiagCleanupReason.Error:end=="user-stopped"?DiagCleanupReason.UserStop:end=="session-ended"?DiagCleanupReason.RemoteEnd:DiagCleanupReason.Unknown;
+            var fields=new[]{DiagValue.Of(DiagKey.Source,site),DiagValue.Of(DiagKey.Reason,reason),DiagValue.Of(DiagKey.EndReason,DiagnosticLog.NormalizeEndReason(end)),
+                DiagValue.Of(DiagKey.Confirmed,DiagnosticLog.NormalizeEndReason(confirmedEndReason)),DiagValue.Of(DiagKey.HadError,hadError),DiagValue.Of(DiagKey.Running,s.IsRunning)};
+            if(error==null)DiagnosticLog.Event(DiagEvent.MainCleanup,s.DiagCorrelation,fields);else DiagnosticLog.Failure(DiagEvent.MainCleanup,s.DiagCorrelation,error,fields);
+        }
+        private static void DiagRefine(long correlation,DiagRefinement outcome){DiagnosticLog.Event(DiagEvent.MainRefinement,correlation,DiagValue.Of(DiagKey.Refinement,outcome));}
         // Stable helper (reusable by the viewer path): bounded fresh snapshot, null when not authoritative or on any error.
         internal async Task<string> GetSessionEndMessageAsync(ControlPlaneClient c,long epoch,CancellationToken token,string sid,string own,string peer)
         {
@@ -354,7 +366,7 @@ namespace PeerDesk.Windows
         // Synchronous: callers invoke this before awaiting anything so in-flight automation observes the new epoch.
         private void InvalidateAutomation()
         {
-            InvalidateAccessRuntime();
+            reconnectAvailable=false;InvalidateAccessRuntime();
             foreach(var accessGrant in consentGrants.Values)if(accessGrant.StartCancellation!=null){accessGrant.StartCancellation.Cancel();accessGrant.StartCancellation.Dispose();}
             autoEpoch++;
             var old=automationCancellation;automationCancellation=new CancellationTokenSource();
@@ -424,7 +436,7 @@ namespace PeerDesk.Windows
         }
         private void DropAuthority(string sid,string confirmedEndReason=null)
         {
-            if(sharing!=null&&sharing.SessionId==sid){sharing.CancelLocal(confirmedEndReason);CleanupTerminalSession(sid);}
+            if(sharing!=null&&sharing.SessionId==sid){DiagCleanup(sharing,DiagCleanupSite.TerminalDrop,confirmedEndReason,null);sharing.CancelLocal(confirmedEndReason);CleanupTerminalSession(sid);}
             else if(viewer!=null&&!viewer.IsDisposed&&viewer.SessionId==sid)CleanupTerminalSession(sid);
             ConsentGrant removedGrant;if(consentGrants.TryGetValue(sid,out removedGrant)&&removedGrant.StartCancellation!=null){removedGrant.StartCancellation.Cancel();removedGrant.StartCancellation.Dispose();}
             consentGrants.Remove(sid);
@@ -498,12 +510,12 @@ namespace PeerDesk.Windows
             catch(OperationCanceledException){ }
             catch(Exception ex){if(!shutdownBusy&&!IsDisposed)status.Text="자동 연결 실패 (수동 [연결] 가능): "+ex.Message;}
         }
-        private void AutoOpenViewer(AutoRequest r)
+        private async void AutoOpenViewer(AutoRequest r)
         {
             if(!RequestValid(r)||r.ViewerOpened)return;
             r.ViewerOpened=true; // once: an explicitly closed viewer is never reopened automatically
             if(viewer!=null&&!viewer.IsDisposed)return;
-            try{viewer=new ViewerForm(r.Client,r.SessionId);var opened=viewer;viewer.FormClosed+=(a,b)=>{if(ReferenceEquals(viewer,opened))viewer=null;};viewer.Show(this);status.Text="연결되었습니다. 상대가 공유를 시작하면 화면이 표시됩니다.";}
+            try{var created=UseSecure?await MakeSecureViewerAsync(r.Client,r.SessionId,automationCancellation.Token,()=>RequestValid(r)):new ViewerForm(r.Client,r.SessionId);if(!RequestValid(r)){created.Dispose();return;}viewer=created;var opened=viewer;viewer.FormClosed+=(a,b)=>{if(ReferenceEquals(viewer,opened))viewer=null;};viewer.Show(this);status.Text="연결되었습니다. 상대가 공유를 시작하면 화면이 표시됩니다.";}
             catch(Exception ex){status.Text="화면 보기 열기 실패: "+ex.Message;}
         }
         private async void AutoStartShare(ConsentGrant g)
@@ -514,13 +526,14 @@ namespace PeerDesk.Windows
             {
                 await lifecycleGate.WaitAsync(token);acquired=true;
                 if(!GrantValid(g)||sharing!=null||IsDisposed)return;
-                var candidate=new MediaSharingSession(g.Client,g.SessionId,g.Scope){RequestStatefulInput=true};sharing=candidate;
-                try{await candidate.StartAsync(token);}
-                catch(Exception ex){if(ReferenceEquals(sharing,candidate))sharing=null;candidate.Dispose();if(!shutdownBusy&&!IsDisposed)status.Text="자동 공유 시작 실패: "+ex.Message;return;}
+                var candidate=new MediaSharingSession(g.Client,g.SessionId,g.Scope){RequestStatefulInput=true};ApplyExperience(candidate);sharing=candidate;
+                try{if(UseSecure)await PrepareSecureTargetAsync(candidate,g.Client,g.SessionId,token);await candidate.StartAsync(token);}
+                catch(Exception ex){DiagCleanup(candidate,DiagCleanupSite.StartFailure,null,ex);RemoveSecureChannel(g.SessionId);if(ReferenceEquals(sharing,candidate))sharing=null;candidate.Dispose();if(!shutdownBusy&&!IsDisposed)status.Text="자동 공유 시작 실패: "+ex.Message;return;}
                 if(!GrantValid(g))
                 {
                     // Stopped/reset/closed while starting: tear down the late start instead of leaving it running.
                     if(ReferenceEquals(sharing,candidate))sharing=null;
+                    DiagCleanup(candidate,DiagCleanupSite.LateStart,null,null);
                     try{await candidate.StopAsync();}catch{}finally{candidate.Dispose();}
                     return;
                 }
@@ -1180,6 +1193,7 @@ namespace PeerDesk.Windows
         {
             if(lifecycleBusy||shutdownBusy)return;
             if(!registrationVerified||client==null){status.Text="서버에 먼저 참가해야 합니다.";return;}
+            reconnectAvailable=true;
             string target=targetBox.Text.Trim(),password=targetPasswordBox.Text;
             Run(()=>{try{var c=RegisteredClient();var item=c.Request(target,password);Add(item);Record(item);
                 if(item.InitiatorDeviceId==c.DeviceId&&item.Status=="Pending")autoRequest=new AutoRequest { SessionId=item.SessionId,OwnId=c.DeviceId,TargetId=item.TargetDeviceId,Binding=ClientBinding(c),Client=c,Epoch=autoEpoch };
@@ -1206,16 +1220,18 @@ namespace PeerDesk.Windows
                 if(sharing!=null){MessageBox.Show(this,"이미 화면 공유가 있습니다. 먼저 중지하십시오.");return;}
                 if(MessageBox.Show(this,"전체 화면이 전송되며 상대가 마우스와 키보드를 제어할 수 있습니다. 계속하시겠습니까?","화면·입력 공유 동의",MessageBoxButtons.YesNo,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
                 if(epoch!=autoEpoch||shutdownBusy||token.IsCancellationRequested)return;
-                var candidate=new MediaSharingSession(c,s.SessionId,autoCaptureScope){RequestStatefulInput=true};sharing=candidate;
+                var candidate=new MediaSharingSession(c,s.SessionId,autoCaptureScope){RequestStatefulInput=true};ApplyExperience(candidate);sharing=candidate;
                 try {
+                    if(UseSecure)await PrepareSecureTargetAsync(candidate,c,s.SessionId,token);
                     await candidate.StartAsync(token);
                     if(epoch!=autoEpoch||shutdownBusy||token.IsCancellationRequested){
                         if(ReferenceEquals(sharing,candidate))sharing=null;
+                        DiagCleanup(candidate,DiagCleanupSite.LateStart,null,null);
                         try{await candidate.StopAsync();}finally{candidate.Dispose();}return;
                     }
                     monitoredSharing=candidate;shareStopDiagnostic=null;
                     status.Text="● 화면·마우스·키보드 공유 중 — 언제든 중지할 수 있습니다.";
-                }catch(Exception ex){if(ReferenceEquals(sharing,candidate))sharing=null;candidate.Dispose();if(!(ex is OperationCanceledException)&&!shutdownBusy)ShowError(ex);}
+                }catch(Exception ex){DiagCleanup(candidate,DiagCleanupSite.StartFailure,null,ex);RemoveSecureChannel(s.SessionId);if(ReferenceEquals(sharing,candidate))sharing=null;candidate.Dispose();if(!(ex is OperationCanceledException)&&!shutdownBusy)ShowError(ex);}
             }catch(OperationCanceledException){}
             catch(Exception ex){if(!shutdownBusy)ShowError(ex);}finally{if(acquired)lifecycleGate.Release();}
         }
@@ -1223,9 +1239,11 @@ namespace PeerDesk.Windows
         private async Task StopShareCore()
         {
             var active=sharing;sharing=null;
+            if(active!=null)RemoveSecureChannel(active.SessionId);
             if(ReferenceEquals(monitoredSharing,active))monitoredSharing=null;
             if(active==null)return;
             shareStopDiagnostic=null;string failure=null;
+            DiagCleanup(active,DiagCleanupSite.StopShare,null,null);
             try{await active.StopAsync();failure=active.LastError;}
             catch(Exception ex){failure=ex.Message;}
             finally{active.Dispose();}
@@ -1234,11 +1252,11 @@ namespace PeerDesk.Windows
                 else status.Text=active.EndReason=="session-ended"?"상대방이 연결을 종료했습니다.":active.EndReason=="expired"?"연결 유효 시간이 만료되어 화면 공유가 종료되었습니다.":"화면 공유를 중지했습니다.";
             }
         }
-        private void OpenViewer()
+        private async void OpenViewer()
         {
             if(lifecycleBusy||shutdownBusy||lifecycleGate.CurrentCount==0)return;var s=Selected();if(s==null)return;
             try{var c=RegisteredClient();if(s.InitiatorDeviceId!=c.DeviceId||s.Status!="Connected"){MessageBox.Show(this,"연결한 장치의 연결 완료 세션만 볼 수 있습니다.");return;}
-                if(viewer!=null&&!viewer.IsDisposed){viewer.Activate();return;}viewer=new ViewerForm(c,s.SessionId);viewer.FormClosed+=(a,b)=>viewer=null;viewer.Show(this);
+                if(viewer!=null&&!viewer.IsDisposed){viewer.Activate();return;}var epoch=autoEpoch;viewer=UseSecure?await MakeSecureViewerAsync(c,s.SessionId,automationCancellation.Token,()=>!shutdownBusy&&epoch==autoEpoch&&ReferenceEquals(client,c)):new ViewerForm(c,s.SessionId);viewer.FormClosed+=(a,b)=>viewer=null;viewer.Show(this);
             }catch(Exception ex){ShowError(ex);}
         }
         private void Revoke(){if(lifecycleBusy||shutdownBusy)return;var s=Selected();if(s==null)return;DropAuthority(s.SessionId);Run(()=>{var item=RegisteredClient().Revoke(s.SessionId);Add(item);Record(item);status.Text="서버가 세션 취소를 확인했습니다.";});}
@@ -1254,7 +1272,9 @@ namespace PeerDesk.Windows
         private void UpdateHistoryList()
         {
             historyList.Items.Clear();historyWarningLabel.Text=history.Warning??historyWriteWarning??"";if(client==null)return;
-            foreach(var item in history.ForServer(client.ServerUrl,client.CertificateSha256))historyList.Items.Add(item);
+            var rows=history.ForServer(client.ServerUrl,client.CertificateSha256);
+            foreach(var item in rows){var bookmark=experience==null?null:experience.Find(client.ServerUrl,client.CertificateSha256,item.TargetDeviceId);item.DisplayAlias=bookmark==null?null:bookmark.Alias;item.IsFavorite=bookmark!=null&&bookmark.Favorite;}
+            foreach(var item in rows.OrderByDescending(x=>x.IsFavorite))historyList.Items.Add(item);
         }
         private void HistoryDoubleClick(object sender,EventArgs e)
         {

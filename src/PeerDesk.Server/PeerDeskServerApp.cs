@@ -192,6 +192,7 @@ public static class PeerDeskServerApp
         var regIpTimes = new ConcurrentDictionary<string, List<DateTimeOffset>>(StringComparer.Ordinal);
         // Single lock for all state mutations.
         var stateLock = new object();
+        var peerPresence = new PeerPresenceState(5000, options.MaxDevices);
         var ownerFeature = options.OwnerFeature is null ? null : new OwnerFeature(options.OwnerFeature, cert, options.Clock);
         var directoryFeature = options.DirectoryFeature is null ? null : new DirectoryFeature(options.DirectoryFeature, options.Clock);
         ownerFeature?.ConfigureDirectory(directoryFeature);
@@ -551,6 +552,26 @@ public static class PeerDeskServerApp
             }
         });
 
+        app.MapGet("/api/v2/peers/presence", (HttpContext ctx) =>
+        {
+            if (!AuthenticateDevice(ctx, out var deviceId)) return Results.Unauthorized();
+            if (!DeviceRateGuard(deviceId)) return Results.StatusCode(429);
+            if (ctx.Request.Query.Count != 1 || !ctx.Request.Query.TryGetValue("ids", out var values) ||
+                values.Count != 1 || values[0] is null || values[0]!.Length > 219)
+                return Results.BadRequest("Expected at most 20 device IDs.");
+            var ids = values[0]!.Split(',');
+            if (ids.Length < 1 || ids.Length > 20 || ids.Distinct(StringComparer.Ordinal).Count() != ids.Length ||
+                ids.Any(id => id.Length != 10 || id.Any(c => c < '0' || c > '9')))
+                return Results.BadRequest("Expected unique 10-digit device IDs.");
+            lock (stateLock)
+            {
+                if (!devices.ContainsKey(deviceId)) return Results.Unauthorized();
+                ctx.Response.Headers.CacheControl = "no-store";
+                // This observation neither refreshes device activity nor any session TTL.
+                return Results.Ok(new { peers = peerPresence.Lookup(deviceId, ids, options.Clock.UtcNow, id => devices.ContainsKey(id)) });
+            }
+        });
+
         app.MapGet("/api/v1/devices/me", (HttpContext ctx) =>
         {
             if (!AuthenticateDevice(ctx, out var deviceId)) return Results.Unauthorized();
@@ -559,6 +580,7 @@ public static class PeerDeskServerApp
             {
                 if (!devices.TryGetValue(deviceId, out var reg)) return Results.Unauthorized();
                 ctx.Response.Headers.CacheControl = "no-store";
+                peerPresence.MarkSelfSeen(deviceId, options.Clock.UtcNow);
                 return Results.Ok(new
                 {
                     deviceId = reg.DeviceId,
@@ -1007,6 +1029,7 @@ public static class PeerDeskServerApp
                 }
 
                 session.Status = SessionStatus.Connected;
+                peerPresence.RememberApprovedPair(session.InitiatorDeviceId, session.TargetDeviceId);
                 session.StatusChangedAt = now;
                 session.LastMediaActivityAt = now;
 
@@ -1062,9 +1085,35 @@ public static class PeerDeskServerApp
             }
         });
 
+        // One authenticated per-device budget across legacy media and opaque v2 traffic.
+        // Buckets are bounded by existing devices; unknown credentials cannot allocate one.
+        var sharedMediaRates = new Dictionary<string, (DateTimeOffset Start, int Count)>(StringComparer.Ordinal);
+        bool SharedMediaRate(string id)
+        {
+            lock (stateLock)
+            {
+                if (!devices.ContainsKey(id)) return false;
+                var now = options.Clock.UtcNow;
+                foreach (var stale in sharedMediaRates.Where(p => !devices.ContainsKey(p.Key) ||
+                    now - p.Value.Start >= TimeSpan.FromMinutes(1)).Select(p => p.Key).ToArray())
+                    sharedMediaRates.Remove(stale);
+                if (!sharedMediaRates.TryGetValue(id, out var bucket) ||
+                    now - bucket.Start >= TimeSpan.FromSeconds(1))
+                    bucket = (now, 0);
+                if (bucket.Count >= 60) return false;
+                sharedMediaRates[id] = (bucket.Start, bucket.Count + 1);
+                return true;
+            }
+        }
         MediaRelay.Map(app, stateLock, sessions,
             context => AuthenticateDevice(context, out var id) ? id : null,
-            CleanExpiredSessions, options.Clock);
+            CleanExpiredSessions, options.Clock, SharedMediaRate);
+        OpaqueSessionRelay.Map(app, stateLock,
+            context => AuthenticateDevice(context, out var id) ? id : null,
+            id => devices.ContainsKey(id),
+            sid => sessions.TryGetValue(sid, out var session) ? session : null,
+            CleanExpiredSessions, (context, id) => SharedMediaRate(id),
+            () => options.Clock.UtcNow, options.MaxSessions);
         return app;
     }
 

@@ -8,7 +8,7 @@ RemoteBridge is an **early experimental preview**, not a hardened remote-access 
 - The default-visible automatic-access setting permits someone who knows a valid PC temporary/fixed PW to view the screen and control input without a dialog while the app is running.
 - A blank PC PW requests consent; a wrong nonblank PW is rejected.
 - Stop sharing to terminate an existing session. Changing a PW/option is not a session disconnect.
-- Pinned TLS is **not end-to-end encryption**. The server can read frames and input.
+- The old v0.1.0-preview.1 uses server-readable pinned TLS. Public v0.1.0-preview.2 adds default-on independently approved peer keys, authenticated ECDH/Finished and encrypted endpoint payloads; both updated clients and the v2 server are required. Explicit legacy mode remains server-readable; no crypto failure silently downgrades. This is not an independent security audit. See [trust and limitations](docs/PHASE27_FEATURES.md) and [release notes](docs/RELEASE_NOTES_v0.1.0-preview.2.md).
 - Fingerprints must be obtained from the actual server owner through a separate trusted channel. Never trust a fingerprint merely because it arrived with an untrusted profile.
 - The embedded trial registry anchor is public and does not promise free/public relay access or availability.
 - Store server keys/config/state outside the public checkout with restrictive permissions. Use one writer per device-state file and tested backups.

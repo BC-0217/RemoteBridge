@@ -40,3 +40,5 @@ known_hosts
 id_rsa*
 id_ed25519*
 # The embedded registry JSON is intentionally public, not a secret.
+# Distribute audited binaries as Release assets, never source blobs.
+/RemoteBridge.exe

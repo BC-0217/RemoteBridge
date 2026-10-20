@@ -1,5 +1,25 @@
 # Verification, test scope and known issues
 
+## Public snapshot v0.1.0-preview.2 (2026-10-21 KST)
+
+Windows asset SHA256: `CD0A98F5226777B98EDAE208492DBA612A2D62CEAC3BD20C5E9557C5AB8ACBC5` (550912 bytes), identical to the pre-improvement local client. ConnectionDiagnostics was rebuilt and rerun: 16 checks passed, exact adjacent product hash matched; server framework-dependent publish also succeeded, combined 11.694 seconds. Existing phase27 module evidence below is reused within its original scope, not rerun certification. Known current failure: viewer input queue age over750ms under sustained input can end screen sharing; the remote UI may incorrectly call this a normal termination. No fix, physical-two-PC regression, new Win7 GUI validation or production capacity certification is claimed. See [release notes](RELEASE_NOTES_v0.1.0-preview.2.md).
+
+**All candidate/public-unchanged statements below are historical at their section dates.**
+
+## Unreleased phase27 candidate
+
+See [PHASE27_FEATURES.md](PHASE27_FEATURES.md) for changed-scope tests, reused module evidence, feature usage and unresolved boundaries. The public asset remains unchanged. The Tokyo AWS follow-up capture-v1 service is deployed. Historical19 partial AWS and4 small-window checks are distinct from the current250ms screen/100ms input candidate. AWS initial native text/drag/up/click plus188 frames/40s and, separately,235 frames/40s followed by native WM_CHAR and typed normal close were observed. The previous late-input timeout is still unexplained. The media-tested artifact is42E91D60…; the later UI-only phase7/candidate build is0E3E0CD2… (231 real net48 UI checks;760/900 windows and1.5× font stress, not actual Windows150% DPI). Core source hashes are unchanged and prior scoped evidence is reused, not a new AWS run; the public release is unchanged. Individual unit, pinned-TLS, fake-native and real-native results are not interchangeable.
+
+## Input failure diagnostic detail (2026-10-18 follow-up)
+
+Current phase7/candidate SHA256 `F72B8C9905FD49BBFC23C3EEDBC38AFC5E6919ED52F6EE874F544D2AC8EFA2B9`, MVID `f759ccee-9378-4372-b09f-7f93904f903e`. Fixed worker/guard/native causes, observed timing and pre-release snapshots now distinguish the earlier unexplained Input-worker fatal. This is diagnostic instrumentation, not a disconnect fix. Release six-fixture builds and direct executions all exited0: new InputDiagnostics67, InputBinding14, CaptureProof60, OpaqueClose20; StatefulClient/DiagnosticLog reported success with33/63 PASS output lines (not newly asserted formal counts). All six adjacent product hashes matched. Root independently checked the exact product logger's two Initialize/Shutdown JSONL records/MVID; this was not Program.Main or an actual share. First-cause/cleanup ordering, single-evaluation safety predicates and original reflection signatures were reviewed.
+
+Actual worker GuardPreFailed, secure ContextBeforePoll and local-TLS legacy LeaseMidBatch events were generated; the latter retains100ms rejection, zero native injection and held cleanup. Fake native/static partial-send seams are not real SendInput/UIPI tests. Actual Win7, new physical-two-PC reproduction, secure LeaseMidBatch/ContextAfterPoll and the remaining sites are not runtime-certified. UI source is unchanged; previous exact75E163 UI243 evidence is reused only for that unchanged UI scope, not rerun against this new binary. See the candidate guide for backup, timings, usage and limitations. No server/public release changes.
+
+## Previous first local disconnect-diagnostic follow-up (2026-10-18)
+
+The current local phase7/candidate EXE is SHA256 `75E163BA1B559D1D77169CE963711F7A0314CA3B6215D392059B9C260FEAD333`. It adds bounded local diagnostics, not a fix for the user's unexplained two-PC disconnect. Final Release diagnostic66 / OpaqueClose20 / CaptureProof60 passed. Root verified UI243 checks against this exact EXE and independently observed two startup/shutdown JSONL records with its MVID. There was no live AWS or physical two-PC reproduction. Prior UI/media hashes above are historical evidence, not the new binary. See the candidate guide for log location, privacy/IO bounds, exact test scope, backup and unverified conditions. The public release is unchanged.
+
 ## Initial public preview: v0.1.0-preview.1
 
 This release packages the existing phase26 implementation. Results below are **previously executed evidence**, not new tests rerun merely by editing release documentation.

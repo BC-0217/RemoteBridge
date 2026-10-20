@@ -58,6 +58,20 @@ A v1-only old binary cannot read v2 state. Rollback requires a matching private 
 
 Windows settings bind credentials to exact endpoint/pin and DPAPI CurrentUser. Remembered inputs are unverified drafts, not authority. Successful recent peers are upserted by exact URL/full pin/peer ID, capped50/64KiB; no PW/token/session ID is history.
 
+## Candidate-only local disconnect diagnostics
+
+Control-plane `Send` failures also record fixed operation/stage categories, elapsed/budget milliseconds, deadline versus caller cancellation, and typed HTTP/Web/socket exception facts. The timer still aborts at the original bounded deadline (maximum 10 seconds); a timer abort is displayed as a timeout, not as an unexplained user cancellation. Addresses, raw request paths, credentials and payloads are excluded. `WaitingResponse` includes connection/TLS work and does not identify an individual network subphase. ConnectionDiagnosticsSmoke covers stalled loopback, cancellation, normal/503 responses, title and log privacy; it is not a live server reachability test.
+
+Stable component ID: `win.local-diagnostics`. This is an observation-only boundary in the unreleased candidate, not a change to the public preview's protocol or the media authorization policy.
+
+`Program` starts `DiagnosticLog`; `MediaSharingSession` records the first observed worker error separately from the settled fatal/typed-normal result and later cleanup. Capture expiry stages and input-authorization timeout budgets carry only numeric timing snapshots. `SecureSessionAdapter` records its first underlying failure and direct/relay outcomes; `ViewerForm` and `MainForm` record viewing and cleanup/refinement events. A local random correlation links these components within one process; it is not a device/session ID and is not shared between PCs.
+
+The fixed local log directory is `%LOCALAPPDATA%/PeerDesk/logs`. Typed enum/numeric records exclude exception message/stack text, addresses, credentials, raw device/session IDs, images, input contents, clipboard and file contents. Producers enqueue bounded events; only a background writer performs rotating file IO. Logging failure must not change authorization, exception propagation, cancellation, input cleanup or reconnect behavior. Normal/fatal classification remains owned by the original media lifecycle, never by the logger.
+
+`InputSafety` additionally records fixed guard/body/native causes and pre-release counts/ages without re-evaluating safety predicates. Its first immutable cause is atomically published in memory before failure visibility/release, while event enqueue follows the original cleanup. Input workers name fixed throw sites and retain actual request-start timing; skipped checks are NotEvaluated. Native SendInput counts/error are captured immediately on the calling thread, with partial-call and repair results separate; Win32 values may be stale and are not authoritative causes. Input contents, key/button values, coordinates and HWNDs remain excluded. This instrumentation does not relax the 250/100/750ms policy or certify a physical two-PC fix.
+
+Regression boundaries: preserve existing `Worker` reflection entry points, original 250ms screen/100ms input/750ms pending authority limits, proof checks before/after Seal, and first-independent-fatal precedence over cleanup/normal-close fallout. The diagnostic smoke and the affected capture/input/opaque-close fixtures verify these boundaries; running those fixtures does not certify the user's physical two-PC WAN connection.
+
 ## Security limitations
 
 TLS terminates at the server: **screen and input are server-readable**. There is no E2E encryption, installed background service, privileged capture or UAC bypass. See [SECURITY.md](SECURITY.md) and [VERIFICATION.md](docs/VERIFICATION.md), including the unresolved intermittent single-input miss.

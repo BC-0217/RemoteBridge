@@ -14,12 +14,14 @@ namespace PeerDesk.Windows
         public string TargetDeviceId { get; set; }
         public string Utc { get; set; }
         public string Status { get; set; }
+        [ScriptIgnore] public string DisplayAlias {get;set;}
+        [ScriptIgnore] public bool IsFavorite {get;set;}
         public override string ToString()
         {
             DateTime parsed;
             string when=DateTime.TryParse(Utc,null,System.Globalization.DateTimeStyles.RoundtripKind,out parsed)
                 ? parsed.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : Utc;
-            return TargetDeviceId + "    (마지막 연결 " + when + ")";
+            return (IsFavorite?"★ ":"")+(String.IsNullOrEmpty(DisplayAlias)?TargetDeviceId:DisplayAlias+" ["+TargetDeviceId+"]")+"    (마지막 연결 "+when+")";
         }
     }
 

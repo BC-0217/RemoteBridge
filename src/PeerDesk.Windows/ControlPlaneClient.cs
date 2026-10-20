@@ -187,6 +187,10 @@ namespace PeerDesk.Windows
             }
             return list;
         }
+        internal async Task<SessionItem> RequestFreshApprovalAsync(string target,CancellationToken ct){
+            if(String.IsNullOrWhiteSpace(target))throw new ArgumentException("Missing target.");
+            return ParseSession(await SendJsonAsync("POST","/api/v1/sessions/request",new{targetDeviceId=target,password=(string)null},ct).ConfigureAwait(false));
+        }
         public SessionItem Request(string target, string temporaryPassword)
         {
             if(String.IsNullOrWhiteSpace(target)) throw new ArgumentException("상대 장치 ID를 입력하십시오.","target");
@@ -488,23 +492,36 @@ namespace PeerDesk.Windows
                 req.Headers[HttpRequestHeader.Authorization]="Bearer "+Token;
             }
             if (extraHeaders != null) foreach (var h in extraHeaders) req.Headers[h.Key]=h.Value;
+            int deadlineExpired=0;
+            var elapsed=System.Diagnostics.Stopwatch.StartNew();
+            var stage=DiagControlStage.Connecting;
             using (cancellationToken.Register(() => { try { req.Abort(); } catch { } }))
-            using (new System.Threading.Timer(delegate { try { req.Abort(); } catch { } }, null, boundedTimeout, System.Threading.Timeout.Infinite))
+            using (new System.Threading.Timer(delegate { Interlocked.Exchange(ref deadlineExpired,1); try { req.Abort(); } catch { } }, null, boundedTimeout, System.Threading.Timeout.Infinite))
             {
                 try {
                     if (body != null) {
                         byte[] bytes=Serialize(body);
                         req.ContentType="application/json; charset=utf-8"; req.ContentLength=bytes.Length;
+                        stage=DiagControlStage.SendingBody;
                         using(var s=req.GetRequestStream()) s.Write(bytes,0,bytes.Length);
                     }
+                    stage=DiagControlStage.WaitingResponse;
                     using(var resp=(HttpWebResponse)req.GetResponse())
                     using(var stream=resp.GetResponseStream())
                     using(var ms=new MemoryStream()) {
+                        stage=DiagControlStage.ReadingResponse;
                         byte[] buf=new byte[4096]; int n; int total=0;
                         while((n=stream.Read(buf,0,buf.Length))>0) { total+=n; if(total>maxResponseBytes) throw new InvalidOperationException("서버 응답이 허용 크기를 초과했습니다."); ms.Write(buf,0,n); }
                         return Encoding.UTF8.GetString(ms.ToArray());
                     }
                 } catch(WebException ex) {
+                    bool canceled=cancellationToken.IsCancellationRequested;
+                    bool expired=Volatile.Read(ref deadlineExpired)!=0||ex.Status==WebExceptionStatus.Timeout;
+                    DiagnosticLog.Failure(DiagEvent.ControlRequestFailure,0,ex,
+                        DiagValue.Of(DiagKey.Operation,ControlOperation(path)),DiagValue.Of(DiagKey.Stage,stage),
+                        DiagValue.Of(DiagKey.Reason,canceled?DiagConnectionCause.CallerCanceled:expired?DiagConnectionCause.Deadline:DiagConnectionCause.Transport),
+                        DiagValue.Of(DiagKey.ElapsedMs,elapsed.ElapsedMilliseconds),DiagValue.Of(DiagKey.BudgetMs,boundedTimeout),
+                        DiagValue.Of(DiagKey.AlreadyCanceled,canceled));
                     cancellationToken.ThrowIfCancellationRequested();
                     var r=ex.Response as HttpWebResponse;
                     string detail="";
@@ -517,8 +534,33 @@ namespace PeerDesk.Windows
                         }
                         throw new InvalidOperationException("서버 응답 "+(int)r.StatusCode+" "+detail,ex);
                     }
-                    throw new InvalidOperationException("서버 연결 실패: "+ex.Message,ex);
+                    throw new InvalidOperationException(ConnectionFailureMessage(ex.Status,expired,boundedTimeout),ex);
                 }
+            }
+        }
+        // Fixed categories only: never record request URLs, session/device ids, headers or payloads.
+        private static DiagControlOperation ControlOperation(string path)
+        {
+            if(path=="/healthz")return DiagControlOperation.Health;
+            if(path.StartsWith("/api/v1/owner/",StringComparison.Ordinal))return DiagControlOperation.Owner;
+            if(path.StartsWith("/api/v1/directory/",StringComparison.Ordinal))return DiagControlOperation.Directory;
+            if(path=="/api/v1/register")return DiagControlOperation.Registration;
+            if(path.StartsWith("/api/v1/devices/",StringComparison.Ordinal))return DiagControlOperation.Device;
+            if(path.StartsWith("/api/v1/sessions/",StringComparison.Ordinal))return DiagControlOperation.Session;
+            return DiagControlOperation.Other;
+        }
+        internal static string ConnectionFailureMessage(WebExceptionStatus status,bool deadlineExpired,int budgetMs)
+        {
+            if(deadlineExpired||status==WebExceptionStatus.Timeout)
+                return "서버 연결 시간 초과 ("+budgetMs+"ms). 서버 주소·포트, 서버 실행 상태 및 네트워크를 확인해 주세요. 사용자 취소가 아닙니다.";
+            switch(status)
+            {
+                case WebExceptionStatus.ConnectFailure:return "서버에 연결하지 못했습니다. 서버 주소·포트와 서버 실행 상태를 확인해 주세요.";
+                case WebExceptionStatus.NameResolutionFailure:return "서버 주소를 찾지 못했습니다. 주소와 DNS 연결을 확인해 주세요.";
+                case WebExceptionStatus.TrustFailure:
+                case WebExceptionStatus.SecureChannelFailure:return "서버 보안 연결을 확인하지 못했습니다. 인증서·전체 지문과 PC 날짜를 확인해 주세요. 인증서 검증은 생략하지 않습니다.";
+                case WebExceptionStatus.RequestCanceled:return "서버 연결 요청이 중단되었습니다. 시간 초과 여부가 확인되지 않았습니다. 진단 로그를 확인해 주세요.";
+                default:return "서버 통신에 실패했습니다 ("+status+"). 네트워크와 서버 상태를 확인해 주세요.";
             }
         }
         private static bool IsMediaJsonPath(string path)
@@ -528,7 +570,7 @@ namespace PeerDesk.Windows
             int slash=path.IndexOf('/',prefix.Length);
             if(slash<=prefix.Length)return false;
             string suffix=path.Substring(slash);
-            return suffix=="/lease"||suffix=="/input-lease"||suffix=="/input"||suffix=="/sharing";
+            return suffix=="/lease"||suffix=="/input-lease"||suffix=="/input"||suffix=="/sharing"||suffix=="/capture-lease";
         }
         private bool ValidateCertificate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
         {

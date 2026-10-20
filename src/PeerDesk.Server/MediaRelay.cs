@@ -23,6 +23,11 @@ public sealed class MediaState
     public const int StatefulInputVersion1 = 1;
     private int _statefulInputVersion;
     public int MediaOptimizationVersion { get; private set; }
+    // Separate capture authority (v1): exact 250ms request-start capture lease; input lease stays 100ms.
+    public const int CaptureLeaseVersion1 = 1;
+    public const int CaptureLeaseMs = 250;
+    private int _captureLeaseVersion;
+    public int CaptureLeaseVersion => _sharingOn ? _captureLeaseVersion : 0;
     public int FrameIntervalMs { get; private set; } = MinFrameIntervalMs;
     public const int OptimizedFrameIntervalMs = 50;
     public string? StopReason { get; private set; }
@@ -48,12 +53,15 @@ public sealed class MediaState
     public bool FrameRateLimited(long nowMs) => _latestFrame != null && nowMs - _lastFrameTickMs < FrameIntervalMs;
 
     // Called under gate
-    public long StartSharing(int statefulInputVersion = 0, int mediaOptimizationVersion = 0)
+    public long StartSharing(int statefulInputVersion = 0, int mediaOptimizationVersion = 0, int captureLeaseVersion = 0)
     {
         if (statefulInputVersion is not (0 or StatefulInputVersion1)) throw new ArgumentOutOfRangeException(nameof(statefulInputVersion));
         if(mediaOptimizationVersion is not (0 or 1) || (mediaOptimizationVersion == 1 && statefulInputVersion != 1)) throw new ArgumentOutOfRangeException(nameof(mediaOptimizationVersion));
+        if(captureLeaseVersion is not (0 or CaptureLeaseVersion1) || (captureLeaseVersion == 1 && mediaOptimizationVersion != 1)) throw new ArgumentOutOfRangeException(nameof(captureLeaseVersion));
         MediaOptimizationVersion = mediaOptimizationVersion;
-        FrameIntervalMs = mediaOptimizationVersion == 1 ? OptimizedFrameIntervalMs : MinFrameIntervalMs;
+        _captureLeaseVersion = captureLeaseVersion;
+        // Capture v1 frames are 10fps: input20 + capture10 + frame10 = 40/s under the unchanged 60/s media quota.
+        FrameIntervalMs = mediaOptimizationVersion == 1 && captureLeaseVersion == 0 ? OptimizedFrameIntervalMs : MinFrameIntervalMs;
         _sharingOn = true;
         StopReason = null;
         _statefulInputVersion = statefulInputVersion;
@@ -69,6 +77,7 @@ public sealed class MediaState
         StopReason = stopReason;
         _sharingOn = false;
         _statefulInputVersion = 0;
+        _captureLeaseVersion = 0;
         _generation = Interlocked.Increment(ref _generation);
         ClearMedia();
         return _generation;
@@ -81,6 +90,7 @@ public sealed class MediaState
         if (_sharingOn) Interlocked.Increment(ref _generation);
         _sharingOn = false;
         _statefulInputVersion = 0;
+        _captureLeaseVersion = 0;
         ClearMedia();
     }
 
@@ -197,9 +207,11 @@ public static class MediaRelay
         ConcurrentDictionary<string, SessionState> sessions,
         Func<HttpContext, string?> authenticate,
         Action cleanExpired,
-        IClock clock)
+        IClock clock,
+        Func<string, bool>? sharedRateGuard = null)
     {
         var mediaRate = new ConcurrentDictionary<string, (long windowStart, int count)>();
+        bool RateAllowed(string id) => sharedRateGuard is not null ? sharedRateGuard(id) : CheckMediaRate(id, clock, mediaRate);
         var group = app.MapGroup("/api/v1/sessions/{sessionId}");
 
         // POST /sharing
@@ -208,7 +220,7 @@ public static class MediaRelay
             var deviceId = authenticate(ctx);
             if (deviceId == null) return Results.Unauthorized();
 
-            if (!CheckMediaRate(deviceId, clock, mediaRate)) return Results.StatusCode(429);
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
             lock (gate) {
                 cleanExpired();
                 if (!sessions.TryGetValue(sessionId, out var candidate)) return Results.NotFound();
@@ -225,6 +237,9 @@ public static class MediaRelay
             int mediaVersion = 0;
             if(req.MediaOptimizationVersion.ValueKind != JsonValueKind.Undefined && (req.MediaOptimizationVersion.ValueKind != JsonValueKind.Number || !req.MediaOptimizationVersion.TryGetInt32(out mediaVersion) || mediaVersion is not (0 or 1))) return Results.BadRequest();
             if(mediaVersion == 1 && (!req.Enabled || statefulVersion != 1)) return Results.BadRequest();
+            int captureVersion = 0;
+            if(req.CaptureLeaseVersion.ValueKind != JsonValueKind.Undefined && (req.CaptureLeaseVersion.ValueKind != JsonValueKind.Number || !req.CaptureLeaseVersion.TryGetInt32(out captureVersion) || captureVersion is not (0 or MediaState.CaptureLeaseVersion1))) return Results.BadRequest();
+            if(captureVersion == 1 && mediaVersion != 1) return Results.BadRequest();
 
             long generation; int grantedVersion = 0;
             lock (gate)
@@ -236,10 +251,13 @@ public static class MediaRelay
                     return Results.Conflict();
                 if (session.TargetDeviceId != deviceId)
                     return Results.StatusCode(403);
-                generation = req.Enabled ? session.Media.StartSharing(statefulVersion, mediaVersion) : session.Media.StopSharing(req.StopReason ?? "error");
+                generation = req.Enabled ? session.Media.StartSharing(statefulVersion, mediaVersion, captureVersion) : session.Media.StopSharing(req.StopReason ?? "error");
                 grantedVersion = session.Media.StatefulInputVersion;
             }
             ctx.Response.Headers["Cache-Control"] = "no-store";
+            if (grantedVersion == MediaState.StatefulInputVersion1 && mediaVersion == 1 && captureVersion == 1)
+                return Results.Ok(new { generation, minFrameIntervalMs = MediaState.MinFrameIntervalMs, inputLeasePollSupported = true, statefulInputVersion = grantedVersion, inputPollIntervalMs = InputPollIntervalMsStateful, mediaOptimizationVersion = 1,
+                    captureLeaseVersion = MediaState.CaptureLeaseVersion1, captureLeaseMs = MediaState.CaptureLeaseMs });
             if (grantedVersion == MediaState.StatefulInputVersion1 && mediaVersion == 1)
                 return Results.Ok(new { generation, minFrameIntervalMs = MediaState.OptimizedFrameIntervalMs, inputLeasePollSupported = true, statefulInputVersion = grantedVersion, inputPollIntervalMs = InputPollIntervalMsStateful, mediaOptimizationVersion = 1 });
             if (grantedVersion == MediaState.StatefulInputVersion1)
@@ -265,7 +283,7 @@ public static class MediaRelay
             if (width <= 0 || width > 1920 || height <= 0 || height > 1080)
                 return Results.BadRequest();
 
-            if (!CheckMediaRate(deviceId, clock, mediaRate)) return Results.StatusCode(429);
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
 
             lock (gate)
             {
@@ -344,7 +362,7 @@ public static class MediaRelay
             var deviceId = authenticate(ctx);
             if (deviceId == null) return Results.Unauthorized();
 
-            if (!CheckMediaRate(deviceId, clock, mediaRate)) return Results.StatusCode(429);
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
 
             byte[]? data;
             long seq, frameGeneration; int width, height, frameStatefulVersion, frameMediaVersion;
@@ -379,7 +397,7 @@ public static class MediaRelay
             var deviceId = authenticate(ctx);
             if (deviceId == null) return Results.Unauthorized();
 
-            if (!CheckMediaRate(deviceId, clock, mediaRate)) return Results.StatusCode(429);
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
 
             lock (gate) {
                 cleanExpired();
@@ -436,7 +454,7 @@ public static class MediaRelay
             var deviceId = authenticate(ctx);
             if (deviceId == null) return Results.Unauthorized();
 
-            if (!CheckMediaRate(deviceId, clock, mediaRate)) return Results.StatusCode(429);
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
 
             long gen; List<InputEvent> events;
             lock (gate)
@@ -461,7 +479,7 @@ public static class MediaRelay
             var deviceId = authenticate(ctx);
             if (deviceId == null) return Results.Unauthorized();
 
-            if (!CheckMediaRate(deviceId, clock, mediaRate)) return Results.StatusCode(429);
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
 
             long gen;
             lock (gate)
@@ -486,7 +504,7 @@ public static class MediaRelay
             var deviceId = authenticate(ctx);
             if (deviceId == null) return Results.Unauthorized();
 
-            if (!CheckMediaRate(deviceId, clock, mediaRate)) return Results.StatusCode(429);
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
 
             long gen; List<InputEvent> events;
             lock (gate)
@@ -504,6 +522,36 @@ public static class MediaRelay
             ctx.Response.Headers["Cache-Control"] = "no-store";
             // Note: no instantaneous remote revoke guarantee; client must check generation before actuation.
             return Results.Ok(new { generation = gen, leaseMs = 100, events });
+        });
+
+        // GET /capture-lease — target-only capture authority for a share that negotiated captureLeaseVersion 1.
+        // Never drains input and never renews idle TTL; the 250ms runs from the client's request start.
+        group.MapGet("/capture-lease", (HttpContext ctx, string sessionId) =>
+        {
+            var deviceId = authenticate(ctx);
+            if (deviceId == null) return Results.Unauthorized();
+
+            if (!RateAllowed(deviceId)) return Results.StatusCode(429);
+
+            long gen;
+            lock (gate)
+            {
+                cleanExpired();
+                if (!sessions.TryGetValue(sessionId, out var session))
+                    return Results.NotFound();
+                if (session.TargetDeviceId != deviceId)
+                    return Results.StatusCode(403);
+                if (session.Status != "Connected" || !session.Media.Active)
+                    return MediaEnded(ctx, session);
+                if (session.Media.CaptureLeaseVersion != MediaState.CaptureLeaseVersion1)
+                {
+                    ctx.Response.Headers["Cache-Control"] = "no-store";
+                    return Results.Conflict();
+                }
+                gen = session.Media.Generation;
+            }
+            ctx.Response.Headers["Cache-Control"] = "no-store";
+            return Results.Ok(new { generation = gen, captureLeaseVersion = MediaState.CaptureLeaseVersion1, leaseMs = MediaState.CaptureLeaseMs });
         });
     }
 
@@ -630,6 +678,7 @@ public static class MediaRelay
         // Undefined = absent (legacy version 0); any present non-integer value is rejected.
         public JsonElement StatefulInputVersion { get; set; }
         public JsonElement MediaOptimizationVersion { get; set; }
+        public JsonElement CaptureLeaseVersion { get; set; }
     }
     private sealed class InputRequest
     {

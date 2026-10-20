@@ -1,10 +1,14 @@
-# RemoteBridge — 리모드브리지
+# RemoteBridge — 리모트브리지
+
+> **Current public snapshot: [v0.1.0-preview.2](https://github.com/BC-0217/RemoteBridge/releases/tag/v0.1.0-preview.2).** This publishes the previously local phase27 client and matching server source. See [release notes](docs/RELEASE_NOTES_v0.1.0-preview.2.md). A held-key input backlog can still stop screen sharing; this is **not a disconnect fix or production release**. The phase27 descriptions below are historical implementation/test evidence, not new end-to-end certification.
 
 **Windows remote screen sharing and control, with servers you manage.**
 
 [한국어 설명](README.ko.md) · [Download preview](https://github.com/BC-0217/RemoteBridge/releases) · [Server setup](docs/SERVER_SETUP.md) · [Security](SECURITY.md) · [Known issues & verification](docs/VERIFICATION.md)
 
-> **Early preview — not production-ready.** Use only with people and computers you are authorized to control. Media is protected by pinned TLS, **not end-to-end encryption**: the server can read screen frames and input.
+> **Early preview — not production-ready.** Use only on authorized computers. The published `v0.1.0-preview.1` uses server-readable pinned TLS. The unreleased phase27 source adds default-on peer-verified E2EE, opt-in direct screen transport, explicit text/file transfer and signed candidate updates: see [candidate features and verification boundaries](docs/PHASE27_FEATURES.md). It requires updated clients **and** the v2 server; the Tokyo AWS service is now updated, while the public release is unchanged and the local phase7 client is synchronized to the verified candidate. The follow-up negotiates a250ms screen-capture lease while retaining100ms input authority and adds bounded fresh-before-dequeue input handling. Separate AWS runs verified initial native drag/click and40s encrypted capture, then40s capture followed by native text and typed normal close. A prior intermittent text timeout remains unexplained; see the exact candidate hash and limitations.
+
+The local candidate's screen/convenience tab now wraps to the window width and uses plain-language labels. See the candidate guide for the UI artifact hash, UI checks and separately scoped historical AWS evidence.
 
 ## What it does
 
@@ -18,7 +22,7 @@
 - Mouse hold/drag/release, wheel, key down/up and Ctrl/Shift/Alt combinations; stop sharing at the target or close the viewer to end a session.
 - Recent successfully connected **peer IDs**, newest first; double-click to fill an ID. No passwords in history.
 - Remembers server inputs with Windows DPAPI for the current account.
-- Original bounded JPEG-over-HTTPS relay, with explicit optimized mode up to **20fps**; legacy peers remain up to10fps. Real throughput is lower and depends on the network/PC.
+- Original bounded JPEG-over-HTTPS relay, with explicit optimized mode up to **20fps**; legacy peers remain up to10fps. The new strict E2EE capture-v1 candidate is capped at10fps. Real throughput is lower and depends on the network/PC.
 
 ## Requirements
 
