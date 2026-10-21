@@ -1,5 +1,30 @@
 # Verification, test scope and known issues
 
+## Release v0.1.0-preview.28 — settings spacing and soft buttons
+
+Windows EXE:1240576 bytes; SHA256 15818F6EA2178184095C513167988FF58DB0DE15FF3B63C4B51A8837A152035F; MVID bfc2c54a-b6ac-4d72-be32-95769b84e201. Fresh exact-product UiAppearanceSmoke:143 checks passed, runtime18.049s/build+run22.047s. The separate source-linked PeerTrustSmoke passed14 checks. Product build:0 warnings/errors.
+
+Settings role/remember and saved-input actions have separate rows; label/dropdown pairs stay grouped, translated buttons grow and shrink. Owner authentication no longer uses a42px clipped row or an AutoSize FlowLayout phantom two-line height: its action row is measured at the actual viewport width. Main/settings soft buttons retain Button semantics, disabled state, keyboard focus, Space feedback and Escape/Cancel. Tests cover all7 languages/light-dark, unchanged ID/PW/server names, minimum-size settings/1.5× font stress and English/Russian/Hindi owner actions at minimum width. This is not real OS150%DPI or exhaustive every-font certification. Owned-window renders were inspected during the UI iterations.
+
+Only UI product files changed after preview.22; the input/crypto/media/diagnostic evidence below is reused within its unchanged-source scope, not rerun against preview.28. No live-server changes, real Win7, physical-two-PC WAN/long-session reproduction or fresh native/UIPI injection test. Input safety stops remain possible. The Linux server ZIP is reused byte-for-byte from preview.2 (Server/Core source unchanged). See [release notes](RELEASE_NOTES_v0.1.0-preview.28.md).
+
+The sections below retain earlier artifact identities and test boundaries; their old local/unreleased statements describe those earlier snapshots.
+
+## Local follow-up 0.1.0-preview.22 — not a public release
+
+Exact standalone EXE:1214464 bytes, SHA256 AC74EDCAAA3D05FFA609FB1F6DF2A6526167066FE5D1946C34D3371B1A82D963, MVID9b31ed51-fe2d-455a-985b-a8b720596468. Built under artifacts/build/remote-final; product sources were frozen before final validation. File version0.1.0.22; product/display0.1.0-preview.22.
+
+Fresh exact-file runs: InputFlow70, InputBinding14, CaptureProof60, OpaqueClose20, InputDiagnostics67, ConnectionDiagnostics16 and UI113 assertions passed. StatefulClient/DiagnosticLog succeeded with33/63 PASS output lines; these are not inflated into additional formal assertion counts. Version automation15 checks passed in an isolated fixture (including unchanged rebuild, concurrent updates and manual metadata synchronization); current-source CheckOnly returned VERSION_UNCHANGED. PeerTrust14 used source-linked UI/security components, not a claim of a second product binary.
+
+Actual Viewer→batch pump→E2EE→pinned localhost HTTPS POST test:120ms response delay/nominal33ms input,80 original events including75 repeated downs, up and mouse;31 POSTs/max batch6, max steady enqueue-to-peer age124ms, workload3829ms. Exact sequence/count/up ordering matched. Key confirmation, descriptor and capability ACK were fixture-controlled in memory, not a full deployed relay handshake; no target native input was injected. First cold POST2284ms was measured separately; real production authentication sends Hello/Finished first, so this fixture cold-start behavior is not evidence of an identical production input stall.
+
+Seven embedded catalogs have689 matching keys and preserved format placeholders. Final owned UI113 checks cover all seven dropdown switches, light/dark updates in both windows, persistence, unchanged IDs/PWs/server names, read-only summary rendering without network requests, old/corrupt options and strict ancestor viewport bounds. Final UI runtime13.871s/build+run17.631s; diagnostic/stateful/connection round12.888s; InputDiagnostics+version round11.442s. Earlier UI70s CPU/layout regression and clipped English main-window bounds were found and corrected; four rendered owned-window PNGs were visually inspected. This is not real Windows150%DPI or every translated layout/native-font certification.
+
+The canonical phase7 and phase27-candidate EXEs were backed up and replaced. The Shared folder's original RemoteBridge.exe could not be overwritten (Access denied; original hash unchanged), so the exact new file is beside it as RemoteBridge-v0.1.0-preview.22.exe. Previous CD0A98 files are preserved under artifacts/backups/pre-inputflow-ui-20261021/{phase7,candidate,shared}. No user process was forcibly stopped; no live server was redeployed/restarted.
+
+Unverified: real Win7/full physical-two-PC WAN reproduction,69-second/long-session soak, real native/UIPI injection, full relay bootstrap in the synthetic transport fixture, every dynamic external error translation and guaranteed delivery of failure notices after disconnect. The improvements do not certify lossless/uninterrupted remote access or eliminate all older fresh-authority failures. Existing source/reflection/test evidence is scoped; no claim that every historical test project was run.
+
+
 ## Public snapshot v0.1.0-preview.2 (2026-10-21 KST)
 
 Windows asset SHA256: `CD0A98F5226777B98EDAE208492DBA612A2D62CEAC3BD20C5E9557C5AB8ACBC5` (550912 bytes), identical to the pre-improvement local client. ConnectionDiagnostics was rebuilt and rerun: 16 checks passed, exact adjacent product hash matched; server framework-dependent publish also succeeded, combined 11.694 seconds. Existing phase27 module evidence below is reused within its original scope, not rerun certification. Known current failure: viewer input queue age over750ms under sustained input can end screen sharing; the remote UI may incorrectly call this a normal termination. No fix, physical-two-PC regression, new Win7 GUI validation or production capacity certification is claimed. See [release notes](RELEASE_NOTES_v0.1.0-preview.2.md).

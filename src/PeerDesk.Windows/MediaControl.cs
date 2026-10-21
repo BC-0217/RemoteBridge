@@ -472,10 +472,12 @@ namespace PeerDesk.Windows
             wire.Secure=value;diagCorrelation=value.DiagCorrelation;}
         // Local diagnostic correlation (random, shared with the attached secure adapter); never derived from session/device ids.
         private long diagCorrelation; internal long DiagCorrelation { get { return diagCorrelation; } }
+        internal PeerInputFailureReason PeerInputFailure {get{return wire!=null&&wire.Secure!=null?wire.Secure.PeerInputFailure:PeerInputFailureReason.None;}}
+        internal bool HasIndependentFailure {get{lock(workerErrorGate)return firstIndependentFatalError!=null;}}
         private readonly System.Diagnostics.Stopwatch diagMetricSample=new System.Diagnostics.Stopwatch(); private int diagExpiriesSinceSample; private long diagLastExpiryLogMs=-1;
         private int minFrameIntervalMs; private string firstWorkerError,firstWorkerEndReason;
         private readonly object workerErrorGate=new object();
-        private Exception firstCandidateError,firstIndependentFatalError; private string firstTypedNormalReason;
+        private Exception firstCandidateError,firstIndependentFatalError,firstInputNoticeError; private string firstTypedNormalReason;
         private volatile bool running;
         private readonly AdaptiveQualityPolicy qualityPolicy=new AdaptiveQualityPolicy();
         internal QualityMode QualityMode { get { return qualityPolicy.Mode; } set { qualityPolicy.SetMode(value); } }
@@ -559,7 +561,7 @@ namespace PeerDesk.Windows
                 diagStage=DiagStartStage.Guard;
                 if(stateful) { var g=new InputSafety(()=>scope.IsCurrent()&&(scope.IsDesktop||scope.ForegroundMatches())); g.DiagCorrelation=diagCorrelation; g.Start(); guard=g; } // second owner fails here
                 running=true; LastError=null; EndReason=null; staleLeaseMisses=0; staleInputMisses=0; firstWorkerError=null; firstWorkerEndReason=null;
-                firstCandidateError=null; firstIndependentFatalError=null; firstTypedNormalReason=null;
+                firstCandidateError=null; firstIndependentFatalError=null; firstInputNoticeError=null; firstTypedNormalReason=null;
                 diagStage=DiagStartStage.Runner; diagMetricSample.Reset(); diagExpiriesSinceSample=0; diagLastExpiryLogMs=-1;
                 DiagnosticLog.Event(DiagEvent.SharingStart,diagCorrelation,DiagValue.Of(DiagKey.Generation,generation),DiagValue.Of(DiagKey.Negotiated,caps.Negotiated),
                     DiagValue.Of(DiagKey.Stateful,stateful),DiagValue.Of(DiagKey.Optimized,optimizedMedia),DiagValue.Of(DiagKey.CaptureLeased,captureLeased),DiagValue.Of(DiagKey.Secure,securePrepared));
@@ -649,6 +651,9 @@ namespace PeerDesk.Windows
                 try { await Task.WhenAll(frames,input).ConfigureAwait(false); } catch { }
                 string error=Volatile.Read(ref firstWorkerError);
                 DisposeGuard(); // release held input before telling the server sharing is off
+                // Untyped input fatal: typed fallback notice only after guard release; an earlier typed reason stays first.
+                var inputFatal=Interlocked.Exchange(ref firstInputNoticeError,null); var secure=wire?.Secure;
+                if(inputFatal!=null&&secure!=null)try { secure.FailPendingInputs(inputFatal,PeerInputFailureReason.Unknown); } catch { }
                 if(error!=null)await SettleWorkerErrorAsync(error).ConfigureAwait(false);
             } finally {
                 DiagnosticLog.Event(DiagEvent.SharingCleanup,diagCorrelation,DiagValue.Of(DiagKey.Stage,DiagCleanupStage.WorkersDone),DiagValue.Of(DiagKey.HadError,Volatile.Read(ref firstWorkerError)!=null),DiagValue.Of(DiagKey.EndReason,DiagnosticLog.NormalizeEndReason(EndReason)));
@@ -711,6 +716,7 @@ namespace PeerDesk.Windows
                         if(firstIndependentFatalError==null)firstIndependentFatalError=ex;
                     }
                 }
+                if(kind==DiagWorker.Input&&diagOutcome==DiagWorkerOutcome.Fatal)Interlocked.CompareExchange(ref firstInputNoticeError,ex,null);
                 // Recorded before cancelling the sibling worker so the first observed worker/kind is never hidden by fallout.
                 if(diagFirst||diagClassFirst)DiagnosticLog.Failure(diagFirst?DiagEvent.SharingWorkerFirstError:DiagEvent.SharingWorkerClassFirst,diagCorrelation,ex,
                     DiagValue.Of(DiagKey.Worker,kind),DiagValue.Of(DiagKey.Outcome,diagOutcome),DiagValue.Of(DiagKey.AlreadyCanceled,ct.IsCancellationRequested));
@@ -1077,25 +1083,25 @@ namespace PeerDesk.Windows
             while(!ct.IsCancellationRequested) {
                 if(g!=null&&g.Failed){DiagInputSite(DiagInputCause.GuardPreFailed,true,g,ct,proofAgeMs:proofUnavailable.ElapsedMilliseconds,bindInputs:bindInputs);throw new InvalidOperationException(g.Failure);}
                 DiagInputContext preContext=InputAuthorityState(binding,proofEpoch,credentialRevision,generation,adapter,ct);
-                if(preContext!=DiagInputContext.Current){DiagInputSite(DiagInputCause.ContextBeforePoll,true,g,ct,context:preContext,proofAgeMs:proofUnavailable.ElapsedMilliseconds,bindInputs:bindInputs);var changed=new InvalidOperationException("secure input identity context changed");adapter.FailPendingInputs(changed);throw changed;}
+                if(preContext!=DiagInputContext.Current){DiagInputSite(DiagInputCause.ContextBeforePoll,true,g,ct,context:preContext,proofAgeMs:proofUnavailable.ElapsedMilliseconds,bindInputs:bindInputs);var changed=new InvalidOperationException("secure input identity context changed");adapter.FailPendingInputs(changed,PeerInputFailureReason.ContextMismatch);throw changed;}
                 long proofRemaining=750-proofUnavailable.ElapsedMilliseconds;int pendingBudget=bindInputs?adapter.PendingInputBudgetMs():-1;
                 int requestBudget=(int)Math.Min(proofRemaining,pendingBudget>=0?pendingBudget:Int32.MaxValue);
                 using(var pollCts=CancellationTokenSource.CreateLinkedTokenSource(ct)) {
-                    if(requestBudget<=0){DiagInputTimeout(DiagInputTimeoutSite.BudgetExhausted,proofUnavailable.ElapsedMilliseconds,-1,requestBudget,proofRemaining,pendingBudget,bindInputs);var expired=new TimeoutException("fresh secure input authority unavailable within 750ms");adapter.FailPendingInputs(expired);if(g!=null)await StatefulFatalAsync(g,"secure input authority timed out").ConfigureAwait(false);throw expired;}
+                    if(requestBudget<=0){DiagInputTimeout(DiagInputTimeoutSite.BudgetExhausted,proofUnavailable.ElapsedMilliseconds,-1,requestBudget,proofRemaining,pendingBudget,bindInputs);var expired=new TimeoutException("fresh secure input authority unavailable within 750ms");adapter.FailPendingInputs(expired,PeerInputFailureReason.AuthorityExpired);if(g!=null)await StatefulFatalAsync(g,"secure input authority timed out").ConfigureAwait(false);throw expired;}
                     pollCts.CancelAfter(requestBudget);
                     var auth=System.Diagnostics.Stopwatch.StartNew();
                     InputLeaseBatch batch;
                     try{batch=await wire.PollInputLeaseAsync(sessionId,true,pollCts.Token,true).ConfigureAwait(false);}
                     catch(OperationCanceledException)when(!ct.IsCancellationRequested){
                         DiagInputTimeout(DiagInputTimeoutSite.PollCanceled,proofUnavailable.ElapsedMilliseconds,auth.ElapsedMilliseconds,requestBudget,proofRemaining,pendingBudget,bindInputs);
-                        var expired=new TimeoutException("fresh secure input authority unavailable within 750ms");adapter.FailPendingInputs(expired);if(g!=null)await StatefulFatalAsync(g,"secure input authority timed out").ConfigureAwait(false);throw expired;
+                        var expired=new TimeoutException("fresh secure input authority unavailable within 750ms");adapter.FailPendingInputs(expired,PeerInputFailureReason.AuthorityExpired);if(g!=null)await StatefulFatalAsync(g,"secure input authority timed out").ConfigureAwait(false);throw expired;
                     }
                     LastInputLeaseResponseMs=(int)Math.Min(10000,auth.ElapsedMilliseconds);
                     ct.ThrowIfCancellationRequested();
                     if(batch.Generation!=generation){DiagInputSite(DiagInputCause.GenerationAfterPoll,true,g,ct,auth.ElapsedMilliseconds,batch.LeaseMs,generationMatch:DiagTri.False,proofAgeMs:proofUnavailable.ElapsedMilliseconds,pendingBudget:pendingBudget,bindInputs:bindInputs);throw new InvalidOperationException("sharing generation changed");}
                     if(g!=null&&g.Failed){DiagInputSite(DiagInputCause.GuardFailedAfterPoll,true,g,ct,auth.ElapsedMilliseconds,batch.LeaseMs,generationMatch:DiagTri.True,proofAgeMs:proofUnavailable.ElapsedMilliseconds,pendingBudget:pendingBudget,bindInputs:bindInputs);throw new InvalidOperationException(g.Failure);}
                     DiagInputContext postContext=InputAuthorityState(binding,proofEpoch,credentialRevision,batch.Generation,adapter,ct);
-                    if(postContext!=DiagInputContext.Current){DiagInputSite(DiagInputCause.ContextAfterPoll,true,g,ct,auth.ElapsedMilliseconds,batch.LeaseMs,postContext,generationMatch:DiagTri.True,proofAgeMs:proofUnavailable.ElapsedMilliseconds,pendingBudget:pendingBudget,bindInputs:bindInputs);var changed=new InvalidOperationException("secure input identity context changed");adapter.FailPendingInputs(changed);throw changed;}
+                    if(postContext!=DiagInputContext.Current){DiagInputSite(DiagInputCause.ContextAfterPoll,true,g,ct,auth.ElapsedMilliseconds,batch.LeaseMs,postContext,generationMatch:DiagTri.True,proofAgeMs:proofUnavailable.ElapsedMilliseconds,pendingBudget:pendingBudget,bindInputs:bindInputs);var changed=new InvalidOperationException("secure input identity context changed");adapter.FailPendingInputs(changed,PeerInputFailureReason.ContextMismatch);throw changed;}
                     if(!scope.IsCurrent()){DiagInputSite(DiagInputCause.ScopeAfterPoll,true,g,ct,auth.ElapsedMilliseconds,batch.LeaseMs,postContext,DiagTri.False,DiagTri.True,proofAgeMs:proofUnavailable.ElapsedMilliseconds,pendingBudget:pendingBudget,bindInputs:bindInputs);throw new InvalidOperationException("capture scope ended");}
                     if(auth.ElapsedMilliseconds<batch.LeaseMs){if(g!=null)g.ObserveServerLease();PublishFrameAuthorization(proofEpoch,batch.Generation,batch.LeaseMs,auth,ct,credentialRevision);proofUnavailable.Restart();}
                     if(bindInputs) {
@@ -1153,7 +1159,7 @@ namespace PeerDesk.Windows
             return g.RunAsync(()=>{
                 if(authority!=null&&ct.IsCancellationRequested){g.NoteBodyCause(DiagBodyCause.CanceledBeforeNative);throw new OperationCanceledException(ct);}
                 if(authority!=null&&!authority.IsContextValidFor(wire.Secure==null?null:wire.Secure.Descriptor,ct)){
-                    g.NoteBodyCause(DiagBodyCause.ContextBeforeNative);var changed=new InvalidOperationException("secure input identity changed before native application");if(wire.Secure!=null)wire.Secure.FailPendingInputs(changed);throw changed;
+                    g.NoteBodyCause(DiagBodyCause.ContextBeforeNative);var changed=new InvalidOperationException("secure input identity changed before native application");if(wire.Secure!=null)wire.Secure.FailPendingInputs(changed,PeerInputFailureReason.ContextMismatch);throw changed;
                 }
                 if(c.Kind=="releaseAll") { g.ReleaseAllOnThread(); return true; }
                 Rectangle b=scope.GetInputBounds();

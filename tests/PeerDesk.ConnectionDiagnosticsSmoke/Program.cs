@@ -12,7 +12,7 @@ static class Program {
    Check(ControlPlaneClient.ConnectionFailureMessage(WebExceptionStatus.RequestCanceled,true,10000).Contains("時間")==false&&ControlPlaneClient.ConnectionFailureMessage(WebExceptionStatus.RequestCanceled,true,10000).Contains("시간 초과"),"timer abort shown as timeout");
    Check(!ControlPlaneClient.ConnectionFailureMessage(WebExceptionStatus.RequestCanceled,false,10000).Contains("사용자 취소가 아닙니다"),"unexplained cancel not assumed timeout");
    Check(ControlPlaneClient.ConnectionFailureMessage(WebExceptionStatus.TrustFailure,false,10000).Contains("인증서 검증은 생략하지"),"TLS failure remains fail closed");
-   using(var f=new MainForm()){Check(f.Text=="RemoteBridge — 리모트브리지","actual form corrected title");}
+   using(var f=new MainForm(Path.Combine(dir,"history.json"),Path.Combine(dir,"settings.json"),null)){Check(f.Text.Contains("RemoteBridge")&&f.Text.Contains(BuildVersion.Display),"actual form displays product and build version");}
    var listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
    try{
     int port=((IPEndPoint)listener.LocalEndpoint).Port;

@@ -1,4 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="Version.props" />
+  <Target Name="RefreshProductVersion" BeforeTargets="GetAssemblyVersion">
+    <Exec Command="powershell.exe -NoProfile -File &quot;$(MSBuildProjectDirectory)/../../tools/Update-Version.ps1&quot; -ProjectRoot &quot;$(MSBuildProjectDirectory)/../..&quot;" Timeout="15000" />
+    <XmlPeek XmlInputPath="$(MSBuildProjectDirectory)/Version.props" Query="/Project/PropertyGroup/Version/text()"><Output TaskParameter="Result" PropertyName="Version" /></XmlPeek>
+    <XmlPeek XmlInputPath="$(MSBuildProjectDirectory)/Version.props" Query="/Project/PropertyGroup/AssemblyVersion/text()"><Output TaskParameter="Result" PropertyName="AssemblyVersion" /></XmlPeek>
+    <XmlPeek XmlInputPath="$(MSBuildProjectDirectory)/Version.props" Query="/Project/PropertyGroup/FileVersion/text()"><Output TaskParameter="Result" PropertyName="FileVersion" /></XmlPeek>
+    <PropertyGroup>
+      <InformationalVersion>$(Version)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
@@ -19,4 +29,5 @@
     <EmbeddedResource Include="directory-bootstrap.embedded.json" LogicalName="PeerDesk.Windows.DirectoryBootstrap.json" />
   </ItemGroup>
   <ItemGroup><Compile Include="../PeerDesk.ReleaseSecurity/*.cs" Link="ReleaseSecurity/%(Filename)%(Extension)" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Locales/*.json" LogicalName="PeerDesk.Windows.Locales.%(Filename)%(Extension)" /></ItemGroup>
 </Project>

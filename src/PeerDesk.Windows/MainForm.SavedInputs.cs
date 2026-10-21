@@ -10,7 +10,7 @@ namespace PeerDesk.Windows
         // Saved inputs are unverified drafts only; the in-memory list in storedSettings is authoritative
         // and every settings rewrite must carry it forward without merging entries back from disk.
         // Restoring never joins, looks up or calls an owner API; it only fills text boxes for the exact matching context.
-        private readonly CheckBox saveInputsBox=new CheckBox { Name="SaveInputs", Text="입력 기억", Checked=true, AutoSize=true, Margin=new Padding(12,6,4,0) };
+        private readonly CheckBox saveInputsBox=new CheckBox { Name="SaveInputs", Text=UiLocalization.Text("입력 기억"), Checked=true, AutoSize=true, Margin=new Padding(12,7,4,4) };
         private readonly Label savedInputsStatus=new Label { Name="SavedInputsStatus", AutoSize=false, Size=new Size(120,32), AutoEllipsis=true, ForeColor=Color.DimGray, Padding=new Padding(0,6,0,0) };
         private Button saveInputsNowButton,forgetSavedInputsButton;
         private readonly ToolTip savedInputsTip=new ToolTip();
@@ -33,10 +33,9 @@ namespace PeerDesk.Windows
 
         private void AddSavedInputsControls(FlowLayoutPanel row)
         {
-            saveInputsNowButton=Button("입력 저장",SaveInputsNow);saveInputsNowButton.Name="SaveInputsNow";
-            forgetSavedInputsButton=Button("저장 입력 삭제",ForgetSavedInputs);forgetSavedInputsButton.Name="ForgetSavedInputs";
-            saveInputsNowButton.Width=82;forgetSavedInputsButton.Width=106;
-            row.Controls.Add(saveInputsBox);row.Controls.Add(saveInputsNowButton);row.Controls.Add(forgetSavedInputsButton);
+            saveInputsNowButton=Button(UiLocalization.Text("입력 저장"),SaveInputsNow);saveInputsNowButton.Name="SaveInputsNow";
+            forgetSavedInputsButton=Button(UiLocalization.Text("저장 입력 삭제"),ForgetSavedInputs);forgetSavedInputsButton.Name="ForgetSavedInputs";
+            row.Controls.Add(saveInputsNowButton);row.Controls.Add(forgetSavedInputsButton);
             row.Controls.Add(CreateHostHelpButton("HelpSavedInputs","?",HostHelpForm.OwnerKey));
             row.Controls.Add(savedInputsStatus);
         }
@@ -49,7 +48,7 @@ namespace PeerDesk.Windows
             guestAliasBox.TextChanged+=(s,e)=>OnGuestAliasChanged();
             saveInputsBox.CheckedChanged+=(s,e)=>OnSaveInputsToggled();
             roleBox.SelectedIndexChanged+=(s,e)=>{ if(!restoringInputs&&!settingsInvalid&&!lifecycleBusy&&!ownerBusy&&!shutdownBusy){string error;if(previousHostRole)CaptureHostDraft(false,out error);else if(guestAliasBox.TextLength>0)CaptureGuestDraft(false,out error); } previousHostRole=HostRoleSelected; RestoreRememberChoice(); UpdateSavedInputsEnabled(); };
-            if(settingsInvalid){SetSavedInputsStatus("설정 파일 오류로 입력을 저장/복원하지 않습니다.",true);UpdateSavedInputsEnabled();return;}
+            if(settingsInvalid){SetSavedInputsStatus(UiLocalization.Text("설정 파일 오류로 입력을 저장/복원하지 않습니다."),true);UpdateSavedInputsEnabled();return;}
             OnHostContextChanged();
             RestoreGuestAtStartup();
             UpdateSavedInputsEnabled();
@@ -96,7 +95,7 @@ namespace PeerDesk.Windows
         private List<SavedInputEntry> WithSavedInput(SavedInputEntry context,Action<SavedInputEntry> mutate,long? revision,bool overrideTombstone,out string error)
         {
             error=null;
-            if(settingsInvalid){error="설정 파일 오류로 저장하지 않았습니다.";return null;}
+            if(settingsInvalid){error=UiLocalization.Text("설정 파일 오류로 저장하지 않았습니다.");return null;}
             if(context==null)return null;
             if(revision.HasValue&&revision.Value!=savedInputsRevision)return null;
             string key=KeyOrNull(context);if(key==null)return null;
@@ -108,8 +107,8 @@ namespace PeerDesk.Windows
             if(!entry.Remember){entry.Remember=true;}
             mutate(entry);
             try{entry=SettingsStore.ValidateSavedInput(entry);}
-            catch(Exception ex){error="입력 형식이 올바르지 않아 저장하지 않았습니다(기존 저장값 유지): "+ex.Message;return null;}
-            if(index<0&&list.Count>=SettingsStore.MaximumSavedInputs){error="저장 입력이 16개로 가득 찼습니다. 필요 없는 항목을 [저장 입력 삭제]하세요.";return null;}
+            catch(Exception ex){error=UiLocalization.Text("입력 형식이 올바르지 않아 저장하지 않았습니다(기존 저장값 유지): ")+ex.Message;return null;}
+            if(index<0&&list.Count>=SettingsStore.MaximumSavedInputs){error=UiLocalization.Text("저장 입력이 16개로 가득 찼습니다. 필요 없는 항목을 [저장 입력 삭제]하세요.");return null;}
             if(index>=0)list.RemoveAt(index);
             list.Add(entry); // most recently saved last; deterministic startup choice
             return list;
@@ -121,7 +120,7 @@ namespace PeerDesk.Windows
             var next=new SettingsState { ProfileJson=!s.IsRegistered&&IsProfileValid(profileBox.Text)?profileBox.Text:(s.ProfileJson??""),IsRegistered=s.IsRegistered,DeviceId=s.DeviceId,BearerToken=s.BearerToken,
                 TemporaryPassword=s.TemporaryPassword,PasswordExpiresAt=s.PasswordExpiresAt,PasswordAutoAccess=s.PasswordAutoAccess,BoundServerUrl=s.BoundServerUrl,BoundCertificateSha256=s.BoundCertificateSha256,SavedInputs=list };
             try{savedInputsWriteBusy=true;settingsStore.Save(next);}
-            catch(Exception ex){inputSaveFailure=true;SetSavedInputsStatus("입력 저장 실패(기존 파일 보존): "+ex.Message,true);return false;}
+            catch(Exception ex){inputSaveFailure=true;SetSavedInputsStatus(UiLocalization.Text("입력 저장 실패(기존 파일 보존): ")+ex.Message,true);return false;}
             finally{savedInputsWriteBusy=false;}
             storedSettings=next;
             return true;
@@ -133,7 +132,7 @@ namespace PeerDesk.Windows
             if(error!=null){SetSavedInputsStatus(error,true);return false;}
             if(list==null)return false;
             if(!CommitSavedInputs(list))return false;
-            SetSavedInputsStatus("입력을 이 Windows 사용자 계정에 암호화해 저장했습니다(미확인 초안).",false);
+            SetSavedInputsStatus(UiLocalization.Text("입력을 이 Windows 사용자 계정에 암호화해 저장했습니다(미확인 초안)."),false);
             return true;
         }
 
@@ -143,15 +142,15 @@ namespace PeerDesk.Windows
         {
             error=null;
             var context=HostInputContextOrNull();
-            if(context==null){error="연결 설정(주소·지문)이 올바르지 않아 저장하지 않았습니다.";return false;}
+            if(context==null){error=UiLocalization.Text("연결 설정(주소·지문)이 올바르지 않아 저장하지 않았습니다.");return false;}
             var existing=SettingsStore.FindSavedInput(storedSettings.SavedInputs,context);
             if(!overrideTombstone&&existing!=null&&!existing.Remember)return false;
             string id=OwnerRoomInfo.Normalize(roomServerIdBox.Text);
             if(id.Length>0&&!OwnerRoomInfo.IsValidServerId(id)){error=OwnerRoomInfo.ServerIdRuleMessage;return false;}
             string owner=ownerSecretBox.Text;
-            if(owner.Length>0&&(owner.Length<32||owner.Length>1024||!OwnerKeyBoundToCurrent())){error="관리키가 32~1024자가 아니거나 현재 연결 설정에 묶여 있지 않아 저장하지 않았습니다.";return false;}
+            if(owner.Length>0&&(owner.Length<32||owner.Length>1024||!OwnerKeyBoundToCurrent())){error=UiLocalization.Text("관리키가 32~1024자가 아니거나 현재 연결 설정에 묶여 있지 않아 저장하지 않았습니다.");return false;}
             string pw=hostJoinPasswordBox.TextLength>0?hostJoinPasswordBox.Text:(roomPasswordDirty?roomJoinPasswordBox.Text:"");
-            if(pw.Length>0&&(pw.Length<8||pw.Length>128)){error="서버 PW는 8~128자여야 합니다(기존 저장값 유지).";return false;}
+            if(pw.Length>0&&(pw.Length<8||pw.Length>128)){error=UiLocalization.Text("서버 PW는 8~128자여야 합니다(기존 저장값 유지).");return false;}
             var list=WithSavedInput(context,e=>{if(id.Length>0)e.ServerId=id;if(owner.Length>0)e.OwnerKey=owner;if(pw.Length>0)e.PasswordDraft=pw;},null,overrideTombstone,out error);
             return error==null&&list!=null&&CommitSavedInputs(list);
         }
@@ -160,11 +159,11 @@ namespace PeerDesk.Windows
             error=null;
             string alias=OwnerRoomInfo.Normalize(guestAliasBox.Text);
             var context=GuestInputContextOrNull(alias);
-            if(context==null){error="서버 ID가 올바르지 않거나 공통 조회 설정이 없어 저장하지 않았습니다.";return false;}
+            if(context==null){error=UiLocalization.Text("서버 ID가 올바르지 않거나 공통 조회 설정이 없어 저장하지 않았습니다.");return false;}
             var existing=SettingsStore.FindSavedInput(storedSettings.SavedInputs,context);
             if(!overrideTombstone&&existing!=null&&!existing.Remember)return false;
             string pw=guestPasswordBox.Text;
-            if(pw.Length>0&&(pw.Length<8||pw.Length>128)){error="서버 PW는 8~128자여야 합니다(기존 저장값 유지).";return false;}
+            if(pw.Length>0&&(pw.Length<8||pw.Length>128)){error=UiLocalization.Text("서버 PW는 8~128자여야 합니다(기존 저장값 유지).");return false;}
             var list=WithSavedInput(context,e=>{if(pw.Length>0)e.PasswordDraft=pw;},null,overrideTombstone,out error);
             return error==null&&list!=null&&CommitSavedInputs(list);
         }
@@ -173,24 +172,24 @@ namespace PeerDesk.Windows
         private void SaveInputsNow()
         {
             if(settingsInvalid||ownerBusy||lifecycleBusy||shutdownBusy)return;
-            if(!saveInputsBox.Checked){SetSavedInputsStatus("[입력 기억]을 켜야 저장할 수 있습니다.",true);return;}
+            if(!saveInputsBox.Checked){SetSavedInputsStatus(UiLocalization.Text("[입력 기억]을 켜야 저장할 수 있습니다."),true);return;}
             string error;
             bool ok=HostRoleSelected?CaptureHostDraft(true,out error):CaptureGuestDraft(true,out error);
-            if(ok){SetSavedInputsStatus("현재 역할의 입력을 암호화해 저장했습니다(미확인 초안, 인증 증명 아님).",false);}
+            if(ok){SetSavedInputsStatus(UiLocalization.Text("현재 역할의 입력을 암호화해 저장했습니다(미확인 초안, 인증 증명 아님)."),false);}
             else if(error!=null)SetSavedInputsStatus(error,true);
         }
         private void ForgetSavedInputs()
         {
             if(settingsInvalid||ownerBusy||lifecycleBusy||shutdownBusy)return;
-            ForgetCurrentRole("현재 역할의 저장 입력을 삭제했습니다. 장치 등록·연결 기록·다른 역할은 유지됩니다.");
+            ForgetCurrentRole(UiLocalization.Text("현재 역할의 저장 입력을 삭제했습니다. 장치 등록·연결 기록·다른 역할은 유지됩니다."));
         }
         private void OnSaveInputsToggled()
         {
             if(restoringInputs)return;
             UpdateSavedInputsEnabled();
-            if(saveInputsBox.Checked){savedInputsRevision++;SetSavedInputsStatus("입력 기억 켜짐 — 삭제했던 항목은 [입력 저장]을 눌러야 다시 저장됩니다.",false);return;}
-            if(settingsInvalid||ownerBusy||lifecycleBusy||shutdownBusy){savedInputsRevision++;SetSavedInputsStatus("작업 중이라 저장 입력 삭제는 작업 후 [저장 입력 삭제]로 하세요. 이후 결과는 저장되지 않습니다.",true);return;}
-            ForgetCurrentRole("입력 기억 꺼짐 — 현재 역할의 저장 입력을 삭제했습니다.");
+            if(saveInputsBox.Checked){savedInputsRevision++;SetSavedInputsStatus(UiLocalization.Text("입력 기억 켜짐 — 삭제했던 항목은 [입력 저장]을 눌러야 다시 저장됩니다."),false);return;}
+            if(settingsInvalid||ownerBusy||lifecycleBusy||shutdownBusy){savedInputsRevision++;SetSavedInputsStatus(UiLocalization.Text("작업 중이라 저장 입력 삭제는 작업 후 [저장 입력 삭제]로 하세요. 이후 결과는 저장되지 않습니다."),true);return;}
+            ForgetCurrentRole(UiLocalization.Text("입력 기억 꺼짐 — 현재 역할의 저장 입력을 삭제했습니다."));
         }
         // Persists a tombstone (Remember=false, no secrets, no resolved target) for the current role's exact context only.
         private void ForgetCurrentRole(string done)
@@ -199,7 +198,7 @@ namespace PeerDesk.Windows
             SavedInputEntry context=HostRoleSelected?HostInputContextOrNull():GuestInputContextOrNull(OwnerRoomInfo.Normalize(guestAliasBox.Text));
             if(HostRoleSelected){ClearOwnerKey();ClearRoom();restoringInputs=true;try{roomServerIdBox.Clear();roomJoinPasswordBox.Clear();}finally{restoringInputs=false;}roomPasswordDirty=false;}
             else{restoringInputs=true;try{guestPasswordBox.Clear();guestAliasBox.Clear();}finally{restoringInputs=false;}guestPasswordRestored=false;}
-            if(context==null){SetSavedInputsStatus("화면 입력은 지웠습니다. 저장 항목을 찾을 현재 연결 설정/서버 ID가 없어 파일은 바꾸지 않았습니다.",true);return;}
+            if(context==null){SetSavedInputsStatus(UiLocalization.Text("화면 입력은 지웠습니다. 저장 항목을 찾을 현재 연결 설정/서버 ID가 없어 파일은 바꾸지 않았습니다."),true);return;}
             string key=KeyOrNull(context);
             var list=CloneStoredSavedInputs();
             int index=list.FindIndex(x=>KeyOrNull(x)==key);
@@ -207,7 +206,7 @@ namespace PeerDesk.Windows
             if(tomb.Role=="guest"){tomb.ServerUrl=null;tomb.RelayUrl=null;tomb.CertificateSha256=null;}else tomb.ServerId=null;
             if(index>=0)list[index]=tomb;
             else if(list.Count<SettingsStore.MaximumSavedInputs)list.Add(tomb);
-            else{SetSavedInputsStatus("화면 입력은 지웠습니다. 저장 항목이 없어 파일은 바꾸지 않았습니다.",false);return;}
+            else{SetSavedInputsStatus(UiLocalization.Text("화면 입력은 지웠습니다. 저장 항목이 없어 파일은 바꾸지 않았습니다."),false);return;}
             if(CommitSavedInputs(list))SetSavedInputsStatus(done,false);
         }
 
@@ -231,7 +230,7 @@ namespace PeerDesk.Windows
                 if(entry.PasswordDraft!=null)roomJoinPasswordBox.Text=entry.PasswordDraft;
             }finally{restoringInputs=false;}
             roomPasswordDirty=false; // restored PW is never sent unless edited
-            SetSavedInputsStatus("저장된 입력을 복원했습니다 — 미확인 초안이며 서버에서 다시 확인해야 합니다.",false);
+            SetSavedInputsStatus(UiLocalization.Text("저장된 입력을 복원했습니다 — 미확인 초안이며 서버에서 다시 확인해야 합니다."),false);
         }
         private void RestoreGuestAtStartup()
         {
@@ -262,7 +261,7 @@ namespace PeerDesk.Windows
             restoringInputs=true;
             try{guestPasswordBox.Text=entry.PasswordDraft;}finally{restoringInputs=false;}
             guestPasswordRestored=true;
-            SetSavedInputsStatus("저장된 서버 ID/PW 초안을 복원했습니다 — 자동 참가하지 않습니다.",false);
+            SetSavedInputsStatus(UiLocalization.Text("저장된 서버 ID/PW 초안을 복원했습니다 — 자동 참가하지 않습니다."),false);
         }
 
         private void RestoreRememberChoice()
@@ -302,7 +301,7 @@ namespace PeerDesk.Windows
                 foreach(var g in list)
                     if(g.Role=="guest"&&g.Remember&&g.ServerUrl!=null&&g.ServerUrl==context.ServerUrl&&g.RelayUrl==context.RelayUrl&&
                        String.Equals(g.CertificateSha256,context.CertificateSha256,StringComparison.OrdinalIgnoreCase)){g.PasswordDraft=join;g.VerifiedJoinPassword=join;}
-            if(CommitSavedInputs(list)){roomPasswordDirty=false;SetSavedInputsStatus("서버가 확인한 서버 ID/PW 초안을 저장했습니다.",false);}
+            if(CommitSavedInputs(list)){roomPasswordDirty=false;SetSavedInputsStatus(UiLocalization.Text("서버가 확인한 서버 ID/PW 초안을 저장했습니다."),false);}
         }
         // GuestJoin: snapshot before lookup. Returns the existing resolved-target entry (or null).
         private SavedInputEntry CaptureGuestBeforeLookup(string alias,string password,out long revision)
@@ -314,7 +313,7 @@ namespace PeerDesk.Windows
             revision=savedInputsRevision;
             return existing!=null&&existing.Remember&&existing.ServerUrl!=null?existing:null;
         }
-        private const string GuestTargetChangedMessage="이 서버 ID가 이전에 참가했던 서버(주소·지문)와 다른 서버를 가리킵니다. 등록과 PW 전송을 하지 않았습니다. 새 서버가 맞다면 [저장 입력 삭제]로 이 서버 ID의 저장 항목을 지운 뒤 PW를 다시 입력하세요.";
+        private static string GuestTargetChangedMessage {get{return UiLocalization.Text("이 서버 ID가 이전에 참가했던 서버(주소·지문)와 다른 서버를 가리킵니다. 등록과 PW 전송을 하지 않았습니다. 새 서버가 맞다면 [저장 입력 삭제]로 이 서버 ID의 저장 항목을 지운 뒤 PW를 다시 입력하세요.");}}
         private void RequireGuestTarget(SavedInputEntry previous,ServerProfile resolved)
         {
             if(previous!=null&&!SameTarget(previous,resolved))
@@ -343,7 +342,7 @@ namespace PeerDesk.Windows
                 if(guestAliasBox.TextLength>0)CaptureGuestDraft(false,out guestError);
             }catch(Exception ex){hostError=ex.Message;}
             if(inputSaveFailure||hostError!=null||guestError!=null){
-                string message="입력을 저장하지 못해 창을 유지합니다. 입력을 수정하거나 해당 역할의 [입력 기억]을 끄세요. "+(hostError??guestError??"기존 파일은 보존되었습니다.");
+                string message=UiLocalization.Text("입력을 저장하지 못해 창을 유지합니다. 입력을 수정하거나 해당 역할의 [입력 기억]을 끄세요. ")+(hostError??guestError??UiLocalization.Text("기존 파일은 보존되었습니다."));
                 SetSavedInputsStatus(message,true);status.Text=message;return false;
             }
             savedInputsRevision++;return true;

@@ -26,7 +26,8 @@ namespace PeerDesk.Windows
         ViewerStart, ViewerFirstFrame, ViewerPollFailure, ViewerInputFailure, ViewerClose,
         MainCleanup, MainRefinement, SecurePreparationFailure,
         InputWorkerSite, InputGuardFailure, InputNativeFailure,
-        ControlRequestFailure
+        ControlRequestFailure,
+        InputCapability, InputBatchSample, InputFailureNotice
     }
 
     internal enum DiagKey
@@ -42,7 +43,8 @@ namespace PeerDesk.Windows
         Cause, PollAgeMs, LeaseMs, Context, ScopeCurrent, GenerationMatch, Index, HeldCount, HeldKeys, HeldButtons,
         HeartbeatAgeMs, ServerLeaseAgeMs, ScopeResult, FirstFailure, Disposed, BodyCause, NativeFailure,
         Operation, Requested, Sent, Win32Error, ErrorCaptured, ErrorMayBeStale, AuthoritativeCause,
-        CleanupAttempted, CleanupRequested, CleanupSent, CleanupWin32Error
+        CleanupAttempted, CleanupRequested, CleanupSent, CleanupWin32Error,
+        BatchCount, GateWaitMs, RttMs, AgeMs, Acked, Capabilities, Delivered
     }
 
     internal enum DiagControlStage { Connecting, SendingBody, WaitingResponse, ReadingResponse }
@@ -72,6 +74,7 @@ namespace PeerDesk.Windows
     internal enum DiagDirectOutcome { Started, LocalDisabled, ListenerUnavailable, PeerDisabled, AcceptTimeout, ConnectFailed, Established, ReadInvalidData, ReadTransport, ReadOther, WriteTransport, WriteTerminal, NegotiationFailed }
     internal enum DiagViewerClose { User, RemoteEnd, Reconnect, Error, Disposed }
     internal enum DiagViewerInputFailure { QueueOverflow, QueueAge, StatefulUnsupported, SendFailed }
+    internal enum DiagInputNotice { Sent, Received, AckReceived, NotNegotiated, GateBusy, SendFailed, SentAckUnavailable }
     internal enum DiagCleanupReason { Unknown, UserStop, RemoteEnd, Error, Expired, Reconnect, Shutdown, Superseded }
     internal enum DiagCleanupSite { StoppedMonitor, TerminalDrop, StopShare, StartFailure, LateStart }
     internal enum DiagRefinement { NotAuthoritative, StaleContext, Superseded, Replaced }

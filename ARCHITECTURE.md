@@ -1,5 +1,16 @@
 # RemoteBridge architecture
 
+## Local input-flow and appearance build (2026-10-21)
+
+- Input flow is an authenticated extension, not a server change: encrypted control offers/ACKs90/91 and typed failure notices/ACKs92/93, bound to the sharing generation. Only acknowledged peers send channel2 binary batches. Old peers retain single-input fallback. Each batch preserves original commands/sequences/repeats, at most32 events/16KiB; decode and capacity validation complete before atomic publication. Focus loss drops only unsent input and retains an in-flight prefix before the existing releaseAll barrier.
+- Viewer queue age remains750ms from original enqueue, checked again after the shared send gate immediately before Seal in batch **and** single fallback. Target input authority100ms, capture250ms, receive-age750ms, permission, generation, replay and cancel checks are unchanged. Sealed packets are never retried. Gate wait, batch count, original age, RTT and fixed failure codes are numeric/enum diagnostics; keys/text/coordinates are not logged.
+- Typed input failures are best-effort and bounded; broken transport/old peers may not receive them. Independent failures and received typed reasons cannot be overwritten by a later revoke. A generic session-ended message is neutral, not proof of normal user termination.
+- Main UI has Home/Sessions; ☰ opens an owned settings window retaining the original controls and handlers. Offline embedded locales:ko/en/ja/zh-CN/ru/fr/hi, Korean default; language/theme dropdowns, immediate light/dark changes, atomic cosmetic settings v2 with v1 compatibility. Identifiers, passwords, aliases and server-provided names are never translated. Fixed read-only status rendering is explicit and never repeats an owner request or credential binding.
+- Product version lives in src/PeerDesk.Windows/Version.props. tools/Update-Version.ps1 is called before assembly-info generation: a changed shipped-source/resource fingerprint increments the preview counter once; unchanged rebuilds do not. A5s lock serializes parallel builds; file/product metadata and displayed version agree. BuildVersion.Display reads the assembly informational version. This does not publish GitHub releases, sign updates or change the signed-update rollback floor.
+
+The public pre-improvement snapshot is v0.1.0-preview.2; the local build below is not a new public release. See docs/VERIFICATION.md for exact hashes, evidence and limitations.
+
+
 ## Components
 
 | Project | Runtime | Responsibility |

@@ -7,7 +7,7 @@ using System.Windows.Forms;
 namespace PeerDesk.Windows {
     internal sealed partial class MainForm {
         private bool reconnectAvailable,reconnecting;
-        private readonly CheckBox reconnectChoice=new CheckBox{Name="RetryNetworkConnection",Text="연결이 끊기면 한 번 다시 요청하기",AutoSize=true};
+        private readonly CheckBox reconnectChoice=new CheckBox{Name="RetryNetworkConnection",Text=UiLocalization.Text("연결이 끊기면 한 번 다시 요청하기"),AutoSize=true};
         internal static bool IsRecoverableNetworkFailure(Exception error){
             bool network=false;
             for(var e=error;e!=null;e=e.InnerException){
@@ -17,7 +17,7 @@ namespace PeerDesk.Windows {
                 network=web.Status==WebExceptionStatus.ConnectFailure||web.Status==WebExceptionStatus.ConnectionClosed||web.Status==WebExceptionStatus.ReceiveFailure||web.Status==WebExceptionStatus.SendFailure||web.Status==WebExceptionStatus.Timeout||web.Status==WebExceptionStatus.NameResolutionFailure;
             }return network;
         }
-        private void AddReconnectOptions(FlowLayoutPanel flow){reconnectChoice.CheckedChanged+=(s,e)=>{if(!reconnectChoice.Checked&&viewer!=null&&!viewer.IsDisposed)viewer.UserIntentCancellation.Cancel();};flow.Controls.Add(reconnectChoice);flow.Controls.Add(new Label{AutoSize=true,MaximumSize=new System.Drawing.Size(620,0),Text="통신이 끊긴 경우에만 새 연결을 한 번 요청합니다. 상대가 다시 승인해야 합니다. 내가 종료했거나 비밀번호·보안 확인에 실패한 경우에는 다시 요청하지 않습니다."});}
+        private void AddReconnectOptions(FlowLayoutPanel flow){reconnectChoice.CheckedChanged+=(s,e)=>{if(!reconnectChoice.Checked&&viewer!=null&&!viewer.IsDisposed)viewer.UserIntentCancellation.Cancel();};flow.Controls.Add(reconnectChoice);flow.Controls.Add(new Label{AutoSize=true,MaximumSize=new System.Drawing.Size(620,0),Text=UiLocalization.Text("통신이 끊긴 경우에만 새 연결을 한 번 요청합니다. 상대가 다시 승인해야 합니다. 내가 종료했거나 비밀번호·보안 확인에 실패한 경우에는 다시 요청하지 않습니다.")});}
         private void ConfigureReconnect(ViewerForm opened,SecureSessionAdapter adapter,ControlPlaneClient c,string sid){
             long epoch=autoEpoch,revision=c.CredentialRevision;string own=c.DeviceId,peer=adapter.Descriptor.TargetDeviceId;
             opened.NetworkInterrupted=()=>TryFreshNetworkRequest(opened,adapter,c,sid,own,peer,epoch,revision);
@@ -37,12 +37,12 @@ namespace PeerDesk.Windows {
                     bounded.Token.ThrowIfCancellationRequested();
                     var item=await c.RequestFreshApprovalAsync(peer,bounded.Token);
                     if(!ReconnectCurrent(c,epoch,revision)||!reconnectChoice.Checked||opened.UserClosed||bounded.IsCancellationRequested)return;
-                    if(item.InitiatorDeviceId!=own||item.TargetDeviceId!=peer||item.Status!="Pending"||item.AutoApprovalEligible)throw new InvalidOperationException("새 승인 요청의 응답이 일치하지 않습니다.");
+                    if(item.InitiatorDeviceId!=own||item.TargetDeviceId!=peer||item.Status!="Pending"||item.AutoApprovalEligible)throw new InvalidOperationException(UiLocalization.Text("새 승인 요청의 응답이 일치하지 않습니다."));
                     Add(item);Record(item);autoRequest=new AutoRequest{SessionId=item.SessionId,OwnId=own,TargetId=peer,Binding=ClientBinding(c),Client=c,Epoch=epoch};
-                    status.Text="네트워크 단절 후 새 연결 요청을 한 번 보냈습니다. 상대 PC에서 다시 승인하면 새 보안 연결을 시작합니다.";
+                    status.Text=UiLocalization.Text("네트워크 단절 후 새 연결 요청을 한 번 보냈습니다. 상대 PC에서 다시 승인하면 새 보안 연결을 시작합니다.");
                 }
             }catch(OperationCanceledException){}
-            catch(Exception ex){if(!shutdownBusy)status.Text="자동 재요청을 완료하지 못했습니다. 직접 다시 연결해 주세요: "+ex.Message;}
+            catch(Exception ex){if(!shutdownBusy)status.Text=UiLocalization.Text("자동 재요청을 완료하지 못했습니다. 직접 다시 연결해 주세요: ")+ex.Message;}
             finally{reconnecting=false;}
         }
         private bool ReconnectCurrent(ControlPlaneClient c,long epoch,long revision){return !shutdownBusy&&!IsDisposed&&registrationVerified&&ReferenceEquals(client,c)&&autoEpoch==epoch&&c.CredentialRevision==revision&&UseSecure;}

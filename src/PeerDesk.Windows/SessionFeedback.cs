@@ -7,7 +7,7 @@ namespace PeerDesk.Windows
     // because test hosts link ControlPlaneClient.cs alone.
     internal static class SessionFeedback
     {
-        internal const string PeerEnded="상대방이 연결을 종료했습니다.";
+        internal const string PeerEnded="연결이 종료되었습니다.";
         internal const string PeerRejected="상대방이 연결 요청을 거절했습니다.";
 
         // Returns a normal end message only for an authoritative snapshot row that matches sid, own id and expected peer

@@ -163,8 +163,8 @@ namespace PeerDesk.Windows
                 {
                     string state;
                     if(PresenceDisplayBindingCurrent()&&presenceStates.TryGetValue(record.TargetDeviceId,out state))
-                        label+="    · "+(state=="online"?"온라인":state=="offline"?"오프라인":"확인 불가");
-                    else label+="    · 확인 불가";
+                        label+="    · "+(state=="online"?UiLocalization.Text("온라인"):state=="offline"?UiLocalization.Text("오프라인"):UiLocalization.Text("확인 불가"));
+                    else label+=UiLocalization.Text("    · 확인 불가");
                 }
                 TextRenderer.DrawText(e.Graphics,label,e.Font,e.Bounds,e.ForeColor,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);
             }

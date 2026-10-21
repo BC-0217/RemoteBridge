@@ -28,7 +28,9 @@ namespace PeerDesk.Windows
         private const int MaxPendingSends=32, MaxQueueAgeMs=750, StatefulMoveThrottleMs=25, LegacyMoveThrottleMs=100, HeartbeatMs=200;
         private sealed class PendingInput { public InputCommand Command; public long EnqueuedMs; }
         private readonly System.Collections.Generic.List<PendingInput> pending=new System.Collections.Generic.List<PendingInput>();
-        private bool pumping, sending, inputFailed;
+        private bool pumping, inputFailed;
+        // Queue-head entries owned by the in-flight send (1 for a single send, n for a negotiated batch).
+        private int inFlightCount;
         private readonly System.Collections.Generic.Queue<long> sentInputTicks=new System.Collections.Generic.Queue<long>();
         private readonly System.Diagnostics.Stopwatch queueClock=System.Diagnostics.Stopwatch.StartNew();
         // Stateful mode only when the latest frame carried X-Stateful-Input-Version: 1.
@@ -74,20 +76,20 @@ namespace PeerDesk.Windows
         {
             client=control;sessionId=id;wire=new MediaWire(client){Secure=secure};
             diagCorrelation=secure!=null?secure.DiagCorrelation:DiagnosticLog.NewCorrelation();
-            Text="RemoteBridge — 원격 화면 보기 — 입력은 유효 프레임 수신 후 활성";
+            Text=UiLocalization.Text("RemoteBridge — 원격 화면 보기 — 입력은 유효 프레임 수신 후 활성");
             Width=900;Height=650;KeyPreview=true;
             picture.Dock=DockStyle.Fill;picture.SizeMode=PictureBoxSizeMode.Zoom;picture.BackColor=Color.Black;picture.TabStop=true;
-            state.Dock=DockStyle.Bottom;state.Height=28;state.Text="프레임 대기 중";
+            state.Dock=DockStyle.Bottom;state.Height=28;state.Text=UiLocalization.Text("프레임 대기 중");
             imageViewport.Controls.Add(picture);Controls.Add(imageViewport);Controls.Add(state);
             var toolbar=new FlowLayoutPanel{Dock=DockStyle.Top,Height=42,WrapContents=false,Padding=new Padding(4)};
-            toolbar.Controls.Add(new Label{Text="보기 배율",AutoSize=true,Padding=new Padding(0,8,2,0)});
+            toolbar.Controls.Add(new Label{Text=UiLocalization.Text("보기 배율"),AutoSize=true,Padding=new Padding(0,8,2,0)});
             zoomChoice.Items.AddRange(new object[]{"창에 맞춤","100%","125%","150%","200%"});zoomChoice.SelectedIndex=0;toolbar.Controls.Add(zoomChoice);
             zoomChoice.SelectedIndexChanged+=(s,e)=>{ReleaseAllLocal();ApplyViewerZoom();};
-            var fullscreenButton=new Button{Name="ViewerFullScreen",Text="전체화면",AutoSize=true};toolbar.Controls.Add(fullscreenButton);
-            fullscreenButton.Click+=(s,e)=>{ReleaseAllLocal();if(!fullScreen){previousBorder=FormBorderStyle;previousWindowState=WindowState;WindowState=FormWindowState.Normal;FormBorderStyle=FormBorderStyle.None;WindowState=FormWindowState.Maximized;fullScreen=true;fullscreenButton.Text="돌아오기";}else{WindowState=FormWindowState.Normal;FormBorderStyle=previousBorder;WindowState=previousWindowState;fullScreen=false;fullscreenButton.Text="전체화면";}};
-            var finish=new Button{Name="ViewerStop",Text="연결 종료",AutoSize=true,ForeColor=Color.DarkRed};toolbar.Controls.Add(finish);finish.Click+=(s,e)=>Close();
-            var clipboardButton=new Button{Name="ViewerSendText",Text="텍스트 보내기",AutoSize=true,Enabled=secure!=null&&(secure.Descriptor.PermissionBits&4)!=0};
-            var fileButton=new Button{Name="ViewerSendFile",Text="파일 보내기",AutoSize=true,Enabled=secure!=null&&(secure.Descriptor.PermissionBits&8)!=0};
+            var fullscreenButton=new Button{Name="ViewerFullScreen",Text=UiLocalization.Text("전체화면"),AutoSize=true};toolbar.Controls.Add(fullscreenButton);
+            fullscreenButton.Click+=(s,e)=>{ReleaseAllLocal();if(!fullScreen){previousBorder=FormBorderStyle;previousWindowState=WindowState;WindowState=FormWindowState.Normal;FormBorderStyle=FormBorderStyle.None;WindowState=FormWindowState.Maximized;fullScreen=true;fullscreenButton.Text=UiLocalization.Text("돌아오기");}else{WindowState=FormWindowState.Normal;FormBorderStyle=previousBorder;WindowState=previousWindowState;fullScreen=false;fullscreenButton.Text=UiLocalization.Text("전체화면");}};
+            var finish=new Button{Name="ViewerStop",Text=UiLocalization.Text("연결 종료"),AutoSize=true,ForeColor=Color.DarkRed};toolbar.Controls.Add(finish);finish.Click+=(s,e)=>Close();
+            var clipboardButton=new Button{Name="ViewerSendText",Text=UiLocalization.Text("텍스트 보내기"),AutoSize=true,Enabled=secure!=null&&(secure.Descriptor.PermissionBits&4)!=0};
+            var fileButton=new Button{Name="ViewerSendFile",Text=UiLocalization.Text("파일 보내기"),AutoSize=true,Enabled=secure!=null&&(secure.Descriptor.PermissionBits&8)!=0};
             clipboardButton.Click+=async (s,e)=>await RunFeatureAction(clipboardButton,()=>SendClipboardText);
             fileButton.Click+=async (s,e)=>await RunFeatureAction(fileButton,()=>SendSelectedFile);
             toolbar.Controls.Add(clipboardButton);toolbar.Controls.Add(fileButton);
@@ -134,14 +136,15 @@ namespace PeerDesk.Windows
                     await SendKey((int)e.KeyCode);
             };
             KeyPress+=async (s,e)=>{if(frameValid&&!Stateful&&!Char.IsControl(e.KeyChar)&&!Char.IsSurrogate(e.KeyChar))await SendText(e.KeyChar);};
+            UiLocalization.Attach(this);
         }
         private async Task RunFeatureAction(Button button,Func<Func<Task>> action)
         {
             if(closingFinished||stop.IsCancellationRequested)return;
             button.Enabled=false;
-            try {var callback=action();if(callback==null)throw new InvalidOperationException("이 연결에서는 사용할 수 없습니다.");await callback();}
-            catch(OperationCanceledException){state.Text="작업을 취소했습니다.";}
-            catch(Exception ex){if(!IsDisposed)MessageBox.Show(this,ex.Message,"요청 실패",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+            try {var callback=action();if(callback==null)throw new InvalidOperationException(UiLocalization.Text("이 연결에서는 사용할 수 없습니다."));await callback();}
+            catch(OperationCanceledException){state.Text=UiLocalization.Text("작업을 취소했습니다.");}
+            catch(Exception ex){if(!IsDisposed)MessageBox.Show(this,ex.Message,UiLocalization.Text("요청 실패"),MessageBoxButtons.OK,MessageBoxIcon.Warning);}
             finally {if(!button.IsDisposed&&!stop.IsCancellationRequested)button.Enabled=true;}
         }
         // Stateful: every VK down (Ctrl/Shift/Alt, Tab, arrows, ...) is consumed here so dialog navigation and KeyPress (WM_CHAR)
@@ -168,7 +171,7 @@ namespace PeerDesk.Windows
             if(picture.Capture)picture.Capture=false;
             if(had&&Stateful&&frameValid&&!inputFailed) {
                 // Preserve only the actual HTTP request in flight. Unsent downs must not run after focus loss.
-                int keep=sending&&pending.Count>0?1:0;
+                int keep=Math.Min(inFlightCount,pending.Count);
                 if(pending.Count>keep)pending.RemoveRange(keep,pending.Count-keep);
                 Enqueue(new InputCommand{Kind="releaseAll"});
             }
@@ -203,7 +206,7 @@ namespace PeerDesk.Windows
                 FramePacket f=await wire.GetFrameForDisplayAsync(sessionId,stop.Token,firstFrameReceived?generation:0,firstFrameReceived?lastSequence:0);
                 double frameRtt=networkWatch.Elapsed.TotalMilliseconds;
                 if(stop.IsCancellationRequested||IsDisposed)return;
-                if(f==null){ReleaseAllLocal();frameValid=false;state.Text="화면 공유가 중지되었습니다.";return;}
+                if(f==null){ReleaseAllLocal();frameValid=false;state.Text=UiLocalization.Text("화면 공유가 중지되었습니다.");return;}
                 if(f.IsDuplicate&&firstFrameReceived&&f.Generation==generation&&f.Sequence==lastSequence)return; // already shown; structure validated
                 if(generation!=0&&generation!=f.Generation) {
                     frameValid=false; pending.Clear(); heldKeys.Clear(); heldButtons.Clear();
@@ -226,26 +229,57 @@ namespace PeerDesk.Windows
                     var old=picture.Image;picture.Image=next;if(old!=null)old.Dispose();
                 }
                 double decodeMs=decodeWatch.Elapsed.TotalMilliseconds;ApplyViewerZoom();
-                diagnostics.Text=(wire.Secure!=null&&wire.Secure.HasDirectScreen?"화면 직결·입력 중계":"중계")+" · 프레임 요청 "+frameRtt.ToString("0")+"ms · 표시 처리 "+decodeMs.ToString("0")+"ms · "+(f.Jpeg.Length/1024.0).ToString("0.0")+"KiB";
-                frameValid=!inputFailed&&InputAllowed;firstFrameReceived=true;lastSequence=f.Sequence;FrameCount++;
+                UiLocalization.BindFormat(diagnostics,wire.Secure!=null&&wire.Secure.HasDirectScreen?"화면 직결·입력 중계 · 프레임 요청 {0}ms · 표시 처리 {1}ms · {2}KiB":"중계 · 프레임 요청 {0}ms · 표시 처리 {1}ms · {2}KiB",
+                    frameRtt.ToString("0"),decodeMs.ToString("0"),(f.Jpeg.Length/1024.0).ToString("0.0"));
+                frameValid=!inputFailed&&!peerFailed&&InputAllowed;firstFrameReceived=true;lastSequence=f.Sequence;FrameCount++;
                 if(FrameCount==1)DiagnosticLog.Event(DiagEvent.ViewerFirstFrame,diagCorrelation,DiagValue.Of(DiagKey.ElapsedMs,preparingWatch.ElapsedMilliseconds),DiagValue.Of(DiagKey.ResponseMs,(long)frameRtt),
                     DiagValue.Of(DiagKey.Stateful,f.StatefulInputVersion==1),DiagValue.Of(DiagKey.Optimized,f.MediaOptimizationVersion==1),DiagValue.Of(DiagKey.Direct,wire.Secure!=null&&wire.Secure.HasDirectScreen));
                 long now=fpsClock.ElapsedMilliseconds; uniqueFrameTicks.Enqueue(now);
                 while(uniqueFrameTicks.Count>0&&now-uniqueFrameTicks.Peek()>FpsWindowMs)uniqueFrameTicks.Dequeue();
                 double fps=uniqueFrameTicks.Count*1000.0/FpsWindowMs;
-                if(!inputFailed)state.Text="공유 중 — generation "+generation+" / frame "+lastSequence+" · "+fps.ToString("0.0")+" fps · "+(!InputAllowed?"화면만 보기":Stateful?"미디어 입력(누름/뗌 상태 전송)":"미디어 입력(개별 키/문자 전송)");
+                if(!inputFailed&&!peerFailed)UiLocalization.BindFormat(state,!InputAllowed?"공유 중 — generation {0} / frame {1} · {2} fps · 화면만 보기":Stateful?"공유 중 — generation {0} / frame {1} · {2} fps · 미디어 입력(누름/뗌 상태 전송)":"공유 중 — generation {0} / frame {1} · {2} fps · 미디어 입력(개별 키/문자 전송)",
+                    generation,lastSequence,fps.ToString("0.0"));
             } catch(OperationCanceledException) { }
               catch(MediaHttpException ex) when(ex.StatusCode==409&&ex.EndReason!=null) { FinishRemoteEnd(ex.EndReason); }
               catch(MediaHttpException ex) when(ex.StatusCode==409&&!firstFrameReceived)
               {
                   frameValid=false;
-                  if(preparingWatch.ElapsedMilliseconds<PreparingGraceMs){state.Text="상대가 화면 공유를 준비하는 중입니다…";}
-                  else{DiagPollFailure(ex,true);pollTimer.Stop();state.Text="화면 공유가 시작되지 않았습니다 (승인/공유 필요): "+ex.Message;}
+                  if(preparingWatch.ElapsedMilliseconds<PreparingGraceMs){state.Text=UiLocalization.Text("상대가 화면 공유를 준비하는 중입니다…");}
+                  else{DiagPollFailure(ex,true);pollTimer.Stop();UiLocalization.BindFormat(state,"화면 공유가 시작되지 않았습니다 (승인/공유 필요): {0}",ex.Message);}
               }
-              catch(Exception ex){DiagPollFailure(ex,false);ReleaseAllLocal();frameValid=false;state.Text="프레임 오류: "+ex.Message;
+              catch(Exception ex){DiagPollFailure(ex,false);ReleaseAllLocal();frameValid=false;UiLocalization.BindFormat(state,"프레임 오류: {0}",ex.Message);
                   if(!networkReported&&!stop.IsCancellationRequested&&wire.Secure!=null&&MainForm.IsRecoverableNetworkFailure(wire.Secure.Failure)){networkReported=true;pollTimer.Stop();var notify=NetworkInterrupted;if(notify!=null)notify();}
               }
-            finally { polling=false; }
+            finally { polling=false; if(!IsDisposed)ShowPeerFailure(PeerFailure); }
+        }
+        // Fixed typed reason received from the peer (never free text). A local first failure keeps priority and the received
+        // reason is never re-notified to the peer; polling continues so a later remote end is still observed.
+        private bool peerFailed;
+        private PeerInputFailureReason PeerFailure { get { var s=wire.Secure; return s!=null?s.PeerInputFailure:PeerInputFailureReason.None; } }
+        private void ShowPeerFailure(PeerInputFailureReason peer)
+        {
+            if(peer==PeerInputFailureReason.None||inputFailed||IsDisposed)return;
+            if(!peerFailed) {
+                peerFailed=true; frameValid=false; pending.Clear(); heldKeys.Clear(); heldButtons.Clear();
+                try { if(picture.Capture)picture.Capture=false; } catch { }
+            }
+            EndReason="error-stopped";
+            UiLocalization.Bind(state,PeerFailureText(peer));
+        }
+        private static string PeerFailureText(PeerInputFailureReason peer)
+        {
+            switch(peer) {
+                case PeerInputFailureReason.QueueOverflow: return "상대 PC 입력 오류: 입력 대기열 초과로 연결이 중단되었습니다.";
+                case PeerInputFailureReason.QueueAge: return "상대 PC 입력 오류: 입력 지연 750ms 초과로 연결이 중단되었습니다.";
+                case PeerInputFailureReason.AuthorityExpired: return "상대 PC 입력 오류: 입력 권한 확인 시간이 초과되어 연결이 중단되었습니다.";
+                case PeerInputFailureReason.ContextMismatch: return "상대 PC 입력 오류: 세션 상태가 바뀌어 연결이 중단되었습니다.";
+                case PeerInputFailureReason.NativeFailure: return "상대 PC 입력 오류: 입력을 적용하지 못해 연결이 중단되었습니다.";
+                case PeerInputFailureReason.InputSafetyFailure: return "상대 PC 입력 오류: 입력 안전 검사 실패로 연결이 중단되었습니다.";
+                case PeerInputFailureReason.ProtocolFailure: return "상대 PC 입력 오류: 입력 프로토콜 오류로 연결이 중단되었습니다.";
+                case PeerInputFailureReason.StatefulUnsupported: return "상대 PC 입력 오류: 상태 입력을 지원하지 않아 연결이 중단되었습니다.";
+                case PeerInputFailureReason.SendFailed: return "상대 PC 입력 오류: 입력 전송 실패로 연결이 중단되었습니다.";
+                default: return "상대 PC 입력 오류로 연결이 중단되었습니다.";
+            }
         }
         // clamp=true (stateful release/drag while captured): coordinates outside the image are clamped onto its edge.
         private bool SendPointer(string kind,Point p,int button,bool clamp)
@@ -268,10 +302,10 @@ namespace PeerDesk.Windows
             if(!frameValid||inputFailed||stop.IsCancellationRequested||IsDisposed)return false;
             if(MediaWire.IsStatefulKind(c.Kind)&&!Stateful)return false; // old target: never an accidental down
             // The head is in flight while pumping, so it is never mutated.
-            if(c.Kind=="move"&&pending.Count>(pumping?1:0)&&pending[pending.Count-1].Command.Kind=="move") {
+            if(c.Kind=="move"&&pending.Count>Math.Max(pumping?1:0,inFlightCount)&&pending[pending.Count-1].Command.Kind=="move") {
                 var last=pending[pending.Count-1].Command; last.X=c.X; last.Y=c.Y; pending[pending.Count-1].EnqueuedMs=queueClock.ElapsedMilliseconds; return true; // consecutive moves only
             }
-            if(pending.Count>=MaxPendingSends) { FailInput("입력 대기열 초과("+MaxPendingSends+")",DiagViewerInputFailure.QueueOverflow,null); return false; }
+            if(pending.Count>=MaxPendingSends) { FailInput(UiLocalization.Format("입력 대기열 초과({0})",MaxPendingSends),DiagViewerInputFailure.QueueOverflow,null); return false; }
             c.Generation=generation; c.Sequence=++sequence;
             pending.Add(new PendingInput{Command=c,EnqueuedMs=queueClock.ElapsedMilliseconds});
             if(!pumping)Pump();
@@ -291,20 +325,55 @@ namespace PeerDesk.Windows
                         await Task.Delay(25);
                         continue;
                     }
-                    if(queueClock.ElapsedMilliseconds-next.EnqueuedMs>MaxQueueAgeMs) { FailInput("입력 지연 750ms 초과",DiagViewerInputFailure.QueueAge,null); return; }
+                    if(queueClock.ElapsedMilliseconds-next.EnqueuedMs>MaxQueueAgeMs) { FailInput(UiLocalization.Text("입력 지연 750ms 초과"),DiagViewerInputFailure.QueueAge,null,queueClock.ElapsedMilliseconds-next.EnqueuedMs); return; }
                     if(!frameValid||stop.IsCancellationRequested||IsDisposed||next.Command.Generation!=generation) {
                         // Not silently dropped: stateful holds are cleared locally; the target releases on its own TTL.
                         pending.Clear(); heldKeys.Clear(); heldButtons.Clear(); return;
                     }
-                    if(MediaWire.IsStatefulKind(next.Command.Kind)&&!Stateful) { FailInput("상대가 상태 입력을 더 이상 지원하지 않습니다",DiagViewerInputFailure.StatefulUnsupported,null); return; }
-                    try { sending=true; sentInputTicks.Enqueue(queueClock.ElapsedMilliseconds); await wire.SendInputAsync(sessionId,next.Command,stop.Token); }
+                    if(MediaWire.IsStatefulKind(next.Command.Kind)&&!Stateful) { FailInput(UiLocalization.Text("상대가 상태 입력을 더 이상 지원하지 않습니다"),DiagViewerInputFailure.StatefulUnsupported,null); return; }
+                    var secure=wire.Secure;
+                    if(secure!=null&&secure.InputBatchingReady) { if(await PumpBatch(secure,next))continue; return; }
+                    // Secure old-peer fallback: the original EnqueuedMs is re-checked after the shared gate immediately before Seal.
+                    long enqueued=next.EnqueuedMs; bool aged=false;
+                    Action preSeal=()=>{ if(queueClock.ElapsedMilliseconds-enqueued>MaxQueueAgeMs){aged=true;throw new TimeoutException("input queue age");} };
+                    try { inFlightCount=1; sentInputTicks.Enqueue(queueClock.ElapsedMilliseconds);
+                        if(secure!=null)await secure.SendInputGuardedAsync(next.Command,stop.Token,preSeal); else await wire.SendInputAsync(sessionId,next.Command,stop.Token); }
+                    catch(TimeoutException) when(aged) { FailInput(UiLocalization.Text("입력 지연 750ms 초과"),DiagViewerInputFailure.QueueAge,null,queueClock.ElapsedMilliseconds-enqueued); return; }
                     catch(OperationCanceledException) { pending.Clear(); return; }
                     catch(ObjectDisposedException) { pending.Clear(); return; }
-                    catch(Exception ex) { if(remoteEnded||await TryObserveRemoteEnd(ex))return; FailInput("입력 전송 실패: "+ex.Message,DiagViewerInputFailure.SendFailed,ex); return; }
-                    finally { sending=false; }
+                    catch(Exception ex) { if(remoteEnded||await TryObserveRemoteEnd(ex))return; FailInput(UiLocalization.Format("입력 전송 실패: {0}",ex.Message),DiagViewerInputFailure.SendFailed,ex); return; }
+                    finally { inFlightCount=0; }
                     if(pending.Count>0&&pending[0]==next)pending.RemoveAt(0);
                 }
             } finally { pumping=false; }
+        }
+        // One negotiated batch: the contiguous queue prefix of original event objects in order (never waits to fill).
+        // Returns true to keep pumping. The oldest original EnqueuedMs is checked before the gate and again by the
+        // pre-Seal guard after the gate; packing never resets a timestamp. Removes exactly the sent prefix afterwards.
+        private async Task<bool> PumpBatch(SecureSessionAdapter secure,PendingInput head)
+        {
+            int n=1; long oldest=head.EnqueuedMs;
+            while(n<pending.Count&&n<SecureSessionAdapter.MaxInputBatchEvents) {
+                var p=pending[n];
+                if(p.Command.Generation!=generation||(MediaWire.IsStatefulKind(p.Command.Kind)&&!Stateful))break; // left for the single-path checks
+                if(p.EnqueuedMs<oldest)oldest=p.EnqueuedMs;
+                n++;
+            }
+            if(queueClock.ElapsedMilliseconds-oldest>MaxQueueAgeMs) { FailInput(UiLocalization.Text("입력 지연 750ms 초과"),DiagViewerInputFailure.QueueAge,null,queueClock.ElapsedMilliseconds-oldest); return false; }
+            var group=pending.GetRange(0,n); var commands=new System.Collections.Generic.List<InputCommand>(n);
+            for(int i=0;i<n;i++)commands.Add(group[i].Command);
+            bool aged=false; long sealAge=-1;
+            Action preSeal=()=>{ sealAge=queueClock.ElapsedMilliseconds-oldest; if(sealAge>MaxQueueAgeMs){aged=true;throw new TimeoutException("input queue age");} };
+            try { inFlightCount=n; sentInputTicks.Enqueue(queueClock.ElapsedMilliseconds); await secure.SendInputsAgedAsync(commands,stop.Token,preSeal,()=>sealAge); }
+            catch(TimeoutException) when(aged) { FailInput(UiLocalization.Text("입력 지연 750ms 초과"),DiagViewerInputFailure.QueueAge,null,sealAge); return false; }
+            catch(OperationCanceledException) { pending.Clear(); return false; }
+            catch(ObjectDisposedException) { pending.Clear(); return false; }
+            catch(Exception ex) { if(remoteEnded||await TryObserveRemoteEnd(ex))return false; FailInput(UiLocalization.Format("입력 전송 실패: {0}",ex.Message),DiagViewerInputFailure.SendFailed,ex); return false; }
+            finally { inFlightCount=0; }
+            if(pending.Count<n)return true;
+            for(int i=0;i<n;i++)if(pending[i]!=group[i])return true;
+            pending.RemoveRange(0,n);
+            return true;
         }
         private async Task<bool> TryObserveRemoteEnd(Exception failure)
         {
@@ -320,29 +389,43 @@ namespace PeerDesk.Windows
         private void FinishRemoteEnd(string reason)
         {
             if(remoteEnded)return;
+            var peer=PeerFailure; // read before the normal reason mapping: a fixed peer failure is never shown as a normal end
             bool priorInputFailure=inputFailed;
-            remoteEnded=true; EndReason=priorInputFailure?"error-stopped":reason; frameValid=false;
+            remoteEnded=true; EndReason=priorInputFailure||peer!=PeerInputFailureReason.None?"error-stopped":reason; frameValid=false;
             DiagnosticLog.Event(DiagEvent.ViewerClose,diagCorrelation,DiagValue.Of(DiagKey.Close,DiagViewerClose.RemoteEnd),DiagValue.Of(DiagKey.EndReason,DiagnosticLog.NormalizeEndReason(reason)),
                 DiagValue.Of(DiagKey.HadError,priorInputFailure),DiagValue.Of(DiagKey.Count,(long)FrameCount));
             pending.Clear(); heldKeys.Clear(); heldButtons.Clear();
             if(picture.Capture)picture.Capture=false;
             pollTimer.Stop(); heartbeatTimer.Stop(); stop.Cancel();
             if(priorInputFailure)return; // a later revoke acknowledgment must not hide our earlier real input failure
-            state.Text=reason=="user-stopped"?"상대 PC에서 화면 공유를 정상 종료했습니다.":
-                reason=="session-ended"?"원격 연결이 종료되었습니다.":
+            if(peer!=PeerInputFailureReason.None) { ShowPeerFailure(peer); return; }
+            state.Text=UiLocalization.Text(reason=="user-stopped"?"상대 PC에서 화면 공유를 정상 종료했습니다.":
+                reason=="session-ended"?"연결이 종료되었습니다.":
                 reason=="expired"?"원격 연결이 만료되어 종료되었습니다.":
-                "상대 PC의 화면 공유가 오류로 중단되었습니다.";
+                "상대 PC의 화면 공유가 오류로 중단되었습니다.");
         }
         // Fail closed: clear queue and local holds, stop input, and revoke the session (target releases on lease loss).
-        private void FailInput(string reason,DiagViewerInputFailure kind,Exception error)
+        // reason is already localized; ageMs is the original queue age (numeric only) for QueueAge, otherwise -1.
+        private void FailInput(string reason,DiagViewerInputFailure kind,Exception error,long ageMs=-1)
         {
             if(inputFailed)return; inputFailed=true; frameValid=false;
-            if(error==null)DiagnosticLog.Event(DiagEvent.ViewerInputFailure,diagCorrelation,DiagValue.Of(DiagKey.Reason,kind),DiagValue.Of(DiagKey.Count,(long)pending.Count));
-            else DiagnosticLog.Failure(DiagEvent.ViewerInputFailure,diagCorrelation,error,DiagValue.Of(DiagKey.Reason,kind),DiagValue.Of(DiagKey.Count,(long)pending.Count));
+            if(error==null)DiagnosticLog.Event(DiagEvent.ViewerInputFailure,diagCorrelation,DiagValue.Of(DiagKey.Reason,kind),DiagValue.Of(DiagKey.Count,(long)pending.Count),DiagValue.Of(DiagKey.AgeMs,ageMs));
+            else DiagnosticLog.Failure(DiagEvent.ViewerInputFailure,diagCorrelation,error,DiagValue.Of(DiagKey.Reason,kind),DiagValue.Of(DiagKey.Count,(long)pending.Count),DiagValue.Of(DiagKey.AgeMs,ageMs));
             pending.Clear(); heldKeys.Clear(); heldButtons.Clear();
             try { if(picture.Capture)picture.Capture=false; } catch { }
-            if(!IsDisposed)state.Text=reason+" — 입력을 중지하고 세션을 종료합니다.";
-            var ignored=CloseSessionAsync();
+            if(!IsDisposed)UiLocalization.BindFormat(state,"{0} — 입력을 중지하고 세션을 종료합니다.",reason);
+            var ignored=NotifyInputFailureThenCloseAsync(kind);
+        }
+        // Local failure is already recorded and released above; the typed notice is bounded (250ms) before the existing revoke.
+        private async Task NotifyInputFailureThenCloseAsync(DiagViewerInputFailure kind)
+        {
+            var secure=wire.Secure;
+            if(secure!=null) {
+                var reason=kind==DiagViewerInputFailure.QueueOverflow?PeerInputFailureReason.QueueOverflow:kind==DiagViewerInputFailure.QueueAge?PeerInputFailureReason.QueueAge:
+                    kind==DiagViewerInputFailure.StatefulUnsupported?PeerInputFailureReason.StatefulUnsupported:PeerInputFailureReason.SendFailed;
+                try { await secure.NotifyInputFailureAsync(reason,250); } catch { }
+            }
+            await CloseSessionAsync();
         }
         private void ApplyViewerZoom()
         {

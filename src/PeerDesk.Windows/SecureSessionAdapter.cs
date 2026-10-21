@@ -63,6 +63,7 @@ namespace PeerDesk.Windows {
                 if(!crypto.KeyConfirmed)throw new InvalidOperationException("Session keys were not confirmed.");
                 readySignal.TrySetResult(true);
             }catch(Exception ex){Fail(ex,DiagAdapterOrigin.Handshake,-1);throw;}
+            AnnounceInputCapabilities();
         }
         async Task SendHandshake(byte kind,byte[] value){
             var packet=new byte[value.Length+1];packet[0]=kind;Buffer.BlockCopy(value,0,packet,1,value.Length);
@@ -83,8 +84,8 @@ namespace PeerDesk.Windows {
                 byte[] plain=crypto.Open(channel==0?(byte)5:channel,packet);
                 if(channel==1)ReceiveFrame(plain);
                 else if(channel==2)ReceiveInput(plain);
-                else {if(channel==0&&ReceiveDirectOffer(plain))return;var handler=FeaturePayload;if(handler!=null)handler(channel,plain);}
-            }catch(Exception ex){Fail(ex,DiagAdapterOrigin.Packet,channel);throw;}
+                else {if(channel==0&&(ReceiveDirectOffer(plain)||ReceiveInputControl(plain)))return;var handler=FeaturePayload;if(handler!=null)handler(channel,plain);}
+            }catch(Exception ex){Fail(ex,DiagAdapterOrigin.Packet,channel);StartFailureNotice((PeerInputFailureReason)Interlocked.Exchange(ref packetNoticeReason,0));throw;}
         }
         void Demand(byte channel,bool outbound){
             if(!Ready)throw new InvalidOperationException("Secure session is not ready.");
@@ -151,38 +152,49 @@ namespace PeerDesk.Windows {
         sealed class PendingInput { internal readonly InputCommand Command; internal readonly long ReceivedAt; internal PendingInput(InputCommand c){Command=new InputCommand{Generation=c.Generation,Sequence=c.Sequence,Kind=c.Kind,X=c.X,Y=c.Y,Button=c.Button,KeyCode=c.KeyCode,Text=c.Text,WheelDelta=c.WheelDelta};ReceivedAt=Stopwatch.GetTimestamp();} }
         internal Task SendInputAsync(InputCommand value,CancellationToken ct){
             MediaWire.ValidateInput(value,true);if(value.Generation!=descriptor.SharingGeneration)throw new InvalidDataException("Wrong secure input generation.");
-            return SendAsync(2,new UTF8Encoding(false,true).GetBytes(json.Serialize(new{generation=value.Generation,sequence=value.Sequence,kind=value.Kind,x=value.X,y=value.Y,button=value.Button,keyCode=value.KeyCode,text=value.Text,wheelDelta=value.WheelDelta})),ct);
+            return SendAsync(2,SerializeInput(value),ct);
+        }
+        byte[] SerializeInput(InputCommand value){
+            return new UTF8Encoding(false,true).GetBytes(json.Serialize(new{generation=value.Generation,sequence=value.Sequence,kind=value.Kind,x=value.X,y=value.Y,button=value.Button,keyCode=value.KeyCode,text=value.Text,wheelDelta=value.WheelDelta}));
         }
         void ReceiveInput(byte[] packet){
             if(packet.Length>16384)throw new InvalidDataException("Secure input bound.");
+            if(packet.Length>0&&packet[0]==BatchMagic){ReceiveInputBatch(packet);return;}
             string raw=new UTF8Encoding(false,true).GetString(packet);ServerProfile.ValidateFlatObjectKeys(raw,json);
             var d=json.Deserialize<Dictionary<string,object>>(raw);
             var batch=new Dictionary<string,object>{{"generation",descriptor.SharingGeneration},{"leaseMs",100},{"events",new object[]{d}}};
             var parsed=MediaWire.ParseInputLease(batch,true);
             if(parsed.Events.Count!=1)throw new InvalidDataException("Invalid secure input batch.");var value=parsed.Events[0];
             object rawGen;if(!d.TryGetValue("generation",out rawGen)||Convert.ToInt64(rawGen)!=descriptor.SharingGeneration||value.Sequence<=lastInputSequence)throw new InvalidDataException("Secure input context/replay.");
-            lock(sync){if(inputQueueClosed||failure!=null||disposed!=0||lifetime.IsCancellationRequested)throw new IOException("Secure input queue is closed.");if(value.Kind=="releaseAll")inputs.Clear();if(inputs.Count>=32)throw new InvalidDataException("Secure input backlog.");inputs.Enqueue(new PendingInput(value));lastInputSequence=value.Sequence;}
+            lock(sync){if(inputQueueClosed||failure!=null||disposed!=0||lifetime.IsCancellationRequested)throw new IOException("Secure input queue is closed.");if(value.Kind=="releaseAll")inputs.Clear();if(inputs.Count>=32){packetNoticeReason=(int)PeerInputFailureReason.QueueOverflow;throw new InvalidDataException("Secure input backlog.");}inputs.Enqueue(new PendingInput(value));lastInputSequence=value.Sequence;}
         }
         internal List<InputCommand> DrainLegacyInputs(){if(descriptor.IsStrictCaptureV1)throw new InvalidOperationException("strict secure input requires immutable authority binding");if((descriptor.PermissionBits&2)==0)return new List<InputCommand>();Demand(2,false);lock(sync){var list=inputs.Select(x=>x.Command).ToList();inputs.Clear();return list;}}
         internal void StopAcceptingInputs(){lock(sync){inputQueueClosed=true;inputs.Clear();}}
         internal int PendingInputBudgetMs(){lock(sync){if(inputs.Count==0)return -1;long age=Stopwatch.GetTimestamp()-inputs.Peek().ReceivedAt;return Math.Max(0,750-(int)(age*1000/Stopwatch.Frequency));}}
-        internal void FailPendingInputs(Exception error){Fail(error??new TimeoutException("pending secure input expired"),DiagAdapterOrigin.PendingInputs,-1);}
+        internal void FailPendingInputs(Exception error){FailPendingInputsCore(error);StartFailureNotice(PeerInputFailureReason.Unknown);}
+        void FailPendingInputsCore(Exception error){Fail(error??new TimeoutException("pending secure input expired"),DiagAdapterOrigin.PendingInputs,-1);}
         internal bool TryBindInputs(InputLeaseAuthority authority,CancellationToken ct,out List<InputCommand> batch){
             batch=new List<InputCommand>();if(authority==null)throw new ArgumentNullException("authority");
+            var notice=PeerInputFailureReason.Unknown;
             try{
                 Demand(2,false);
+                notice=PeerInputFailureReason.ContextMismatch;
                 if(!Ready||!authority.IsContextValidFor(descriptor,ct))throw new InvalidOperationException("Secure input authority changed.");
                 lock(sync){
+                    notice=PeerInputFailureReason.None;
                     if(failure!=null)throw new IOException("Secure stream failed.",failure);
+                    notice=PeerInputFailureReason.ContextMismatch;
                     if(!authority.IsContextValidFor(descriptor,ct))throw new InvalidOperationException("Secure input authority changed.");
+                    notice=PeerInputFailureReason.QueueAge;
                     if(inputs.Count>0){long age=Stopwatch.GetTimestamp()-inputs.Peek().ReceivedAt;if(age>=750L*Stopwatch.Frequency/1000){inputs.Clear();throw new TimeoutException("pending secure input exceeded 750ms authority wait");}}
+                    notice=PeerInputFailureReason.ProtocolFailure;
                     if(authority.RequestStart.ElapsedMilliseconds>=authority.LeaseMs)return false;
                     if(authority.Id<=lastBoundAuthorityId)throw new InvalidDataException("input authority replay.");
                     lastBoundAuthorityId=authority.Id;
                     while(inputs.Count>0)batch.Add(inputs.Dequeue().Command);
                     return true;
                 }
-            }catch(Exception ex){Fail(ex,DiagAdapterOrigin.BindInputs,-1);throw;}
+            }catch(Exception ex){Fail(ex,DiagAdapterOrigin.BindInputs,-1);StartFailureNotice(notice);throw;}
         }
         void Fail(Exception ex){Fail(ex,DiagAdapterOrigin.Unknown,-1);}
         // detail: packet/send channel, or for SendFrame 1=after Seal / 0=before Seal; -1 when not applicable.
